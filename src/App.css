@@ -142,14 +142,38 @@ button {
   margin-top: 12px;
 }
 
+.sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.load-btn,
 .download-btn {
-  background: #15803d;
   color: white;
   white-space: nowrap;
 }
 
+.load-btn {
+  background: #1d4ed8;
+}
+
+.download-btn {
+  background: #15803d;
+}
+
+.load-btn:disabled,
+.download-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .add-btn:hover {
   background: #1d4ed8;
+}
+
+.load-btn:hover {
+  background: #1e40af;
 }
 
 .download-btn:hover {

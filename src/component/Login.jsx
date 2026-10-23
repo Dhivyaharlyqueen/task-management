@@ -1,20 +1,20 @@
 import { useState } from "react";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "../firebase";
+import Snackbar, { useSnackbar } from "./Snackbar";
 import "../style/Login.css";
 
 function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const { snack, showSnack, closeSnack } = useSnackbar();
 
   async function handleLogin(e) {
     e.preventDefault();
-    setError("");
     try {
       await signInWithEmailAndPassword(auth, email, password);
     } catch {
-      setError("Invalid email or password.");
+      showSnack("Invalid email or password.", "error");
     }
   }
 
@@ -58,8 +58,6 @@ function Login() {
             required
           />
 
-          {error && <p style={{ color: "red", fontSize: 13 }}>{error}</p>}
-
           <button type="submit" className="login-button">
             Sign In →
           </button>
@@ -67,6 +65,7 @@ function Login() {
           <p className="login-note">Employee Task Tracker</p>
         </form>
       </div>
+      <Snackbar snack={snack} onClose={closeSnack} />
     </div>
   );
 }
