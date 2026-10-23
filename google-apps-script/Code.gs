@@ -14,17 +14,9 @@ function doGet(e) {
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var incoming = JSON.parse(e.postData.contents);
-  if (sheet.getLastRow() === 0) {
-    sheet.appendRow(["Employee ID", "Employee Name", "Task Done"]);
-  }
-  var existing = {};
-  readRows().forEach(function (row) {
-    existing[taskKey(row)] = true;
-  });
+  sheet.clearContents();
+  sheet.appendRow(["Employee ID", "Employee Name", "Task Done"]);
   incoming.forEach(function (row) {
-    var key = taskKey(row);
-    if (existing[key]) return;
-    existing[key] = true;
     sheet.appendRow([row["Employee ID"], row["Employee Name"], row["Task Done"]]);
   });
   return ContentService.createTextOutput("ok");

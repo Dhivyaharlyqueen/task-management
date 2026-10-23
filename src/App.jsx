@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import Snackbar, { useSnackbar } from "./component/Snackbar";
@@ -56,6 +56,8 @@ function App() {
   const [empName, setEmpName] = useState("");
   const [task, setTask] = useState("");
   const [tasks, setTasks] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const { snack, showSnack, closeSnack } = useSnackbar();
   const tasksRef = useRef([]);
@@ -76,21 +78,50 @@ function App() {
     return unsubscribe;
   }, []);
 
+  function clearForm() {
+    setEditingId(null);
+    setEmpId("");
+    setEmpName("");
+    setTask("");
+  }
+
+  function startEdit(item) {
+    setEditingId(item.id);
+    setEmpId(item["Employee ID"] ?? "");
+    setEmpName(item["Employee Name"] ?? "");
+    setTask(item["Task Done"] ?? "");
+    setConfirmId(null);
+  }
+
   async function addTask(e) {
     e.preventDefault();
     if (!empId.trim() || !empName.trim() || !task.trim()) {
       showSnack("Please fill all fields", "error");
       return;
     }
-    await addDoc(collection(db, "tasks"), {
+    const data = {
       "Employee ID": empId.trim(),
       "Employee Name": empName.trim(),
       "Task Done": task.trim(),
-      createdAt: Date.now(),
-    });
-    setEmpId("");
-    setEmpName("");
-    setTask("");
+    };
+    if (editingId) {
+      await updateDoc(doc(db, "tasks", editingId), data);
+      showSnack("Task updated", "success");
+    } else {
+      await addDoc(collection(db, "tasks"), {
+        ...data,
+        createdAt: Date.now(),
+      });
+      showSnack("Task added", "success");
+    }
+    clearForm();
+  }
+
+  async function removeTask(id) {
+    await deleteDoc(doc(db, "tasks", id));
+    if (editingId === id) clearForm();
+    setConfirmId(null);
+    showSnack("Task deleted", "success");
   }
 
   async function loadFromSheets(currentTasks = tasksRef.current, silent = false) {
@@ -181,8 +212,10 @@ function App() {
 
       <main className="container">
         <section className="form-card">
-          <h2>Add Employee Task</h2>
-          <p className="subtitle">Enter employee details and completed work.</p>
+          <h2>{editingId ? "Edit Employee Task" : "Add Employee Task"}</h2>
+          <p className="subtitle">
+            {editingId ? "Update the selected task, then save." : "Enter employee details and completed work."}
+          </p>
 
           <form onSubmit={addTask}>
             <label htmlFor="empId">Employee ID</label>
@@ -215,9 +248,16 @@ function App() {
               required
             />
 
-            <button className="add-btn" type="submit">
-              + Add Task
-            </button>
+            <div className="form-actions">
+              <button className="add-btn" type="submit">
+                {editingId ? "Update Task" : "+ Add Task"}
+              </button>
+              {editingId && (
+                <button className="cancel-btn" type="button" onClick={clearForm}>
+                  Cancel
+                </button>
+              )}
+            </div>
           </form>
         </section>
 
@@ -244,12 +284,13 @@ function App() {
                   <th>Employee ID</th>
                   <th>Employee Name</th>
                   <th>Task Done</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {tasks.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="empty">No tasks added yet</td>
+                    <td colSpan={4} className="empty">No tasks added yet</td>
                   </tr>
                 ) : (
                   tasks.map((item) => (
@@ -257,6 +298,27 @@ function App() {
                       <td>{item["Employee ID"]}</td>
                       <td>{item["Employee Name"]}</td>
                       <td>{item["Task Done"]}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button type="button" className="edit-btn" onClick={() => startEdit(item)}>
+                            Edit
+                          </button>
+                          {confirmId === item.id ? (
+                            <>
+                              <button type="button" className="delete-btn" onClick={() => removeTask(item.id)}>
+                                Confirm
+                              </button>
+                              <button type="button" className="cancel-btn" onClick={() => setConfirmId(null)}>
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button type="button" className="delete-btn" onClick={() => setConfirmId(item.id)}>
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))
                 )}

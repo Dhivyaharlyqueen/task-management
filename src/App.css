@@ -240,10 +240,58 @@ button {
   transition: background 0.15s ease, transform 0.15s ease;
 }
 
+.form-actions,
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .add-btn {
   background: #2563eb;
   color: white;
+}
+
+.form-actions .add-btn,
+.form-actions .cancel-btn {
   margin-top: 10px;
+}
+
+.cancel-btn,
+.edit-btn,
+.delete-btn {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.cancel-btn {
+  color: #334155;
+}
+
+.edit-btn {
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  padding: 6px 10px;
+}
+
+.delete-btn {
+  color: #b91c1c;
+  border-color: #fecaca;
+  padding: 6px 10px;
+}
+
+.cancel-btn:hover,
+.edit-btn:hover {
+  background: #f8fafc;
+}
+
+.delete-btn:hover {
+  background: #fef2f2;
+}
+
+.row-actions .cancel-btn {
+  padding: 6px 10px;
+  margin-top: 0;
 }
 
 .sheet-actions {
