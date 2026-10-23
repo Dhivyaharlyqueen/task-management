@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import * as XLSX from "xlsx";
 import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import "./App.css";
+
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyx_qfeR0NmiA1LJxKNH4eWqKNTknjBTiLTsEgc9cg9TvOeGf3eK-wE7YEOEIuC-k35Gg/exec";
 
 function App() {
   const [empId, setEmpId] = useState("");
@@ -36,21 +37,26 @@ function App() {
     setTask("");
   }
 
-  function downloadExcel() {
+  async function syncToSheets() {
     if (tasks.length === 0) {
       alert("Please add at least one task");
       return;
     }
-    const data = tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
-      "Employee ID": id,
-      "Employee Name": name,
-      "Task Done": done,
-    }));
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    worksheet["!cols"] = [{ wch: 18 }, { wch: 25 }, { wch: 50 }];
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Tasks");
-    XLSX.writeFile(workbook, "Employee_Tasks.xlsx");
+    try {
+      await fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
+          "Employee ID": id,
+          "Employee Name": name,
+          "Task Done": done,
+        }))),
+      });
+      alert("Synced to Google Sheets successfully!");
+    } catch {
+      alert("Failed to sync. Please try again.");
+    }
   }
 
   return (
@@ -116,8 +122,8 @@ function App() {
               <h2>Employee Task List</h2>
               <p className="subtitle">Total tasks: {tasks.length}</p>
             </div>
-            <button type="button" className="download-btn" onClick={downloadExcel}>
-              Download Excel
+            <button type="button" className="download-btn" onClick={syncToSheets}>
+              Sync to Google Sheets
             </button>
           </div>
 
