@@ -3,15 +3,15 @@ import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firesto
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import "./App.css";
-
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyx_qfeR0NmiA1LJxKNH4eWqKNTknjBTiLTsEgc9cg9TvOeGf3eK-wE7YEOEIuC-k35Gg/exec";
-
+ 
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec%22;
+ 
 function App() {
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
   const [task, setTask] = useState("");
   const [tasks, setTasks] = useState([]);
-
+ 
   useEffect(() => {
     const q = query(collection(db, "tasks"), orderBy("createdAt"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -19,7 +19,7 @@ function App() {
     });
     return unsubscribe;
   }, []);
-
+ 
   async function addTask(e) {
     e.preventDefault();
     if (!empId.trim() || !empName.trim() || !task.trim()) {
@@ -36,29 +36,33 @@ function App() {
     setEmpName("");
     setTask("");
   }
-
+ 
   async function syncToSheets() {
     if (tasks.length === 0) {
       alert("Please add at least one task");
       return;
     }
+    const payload = tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
+      "Employee ID": id,
+      "Employee Name": name,
+      "Task Done": done,
+    }));
     try {
+      // text/plain keeps this a simple request. Apps Script rejects the
+      // CORS preflight that application/json would trigger, and no-cors
+      // lets the browser follow Google's redirect.
       await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
-          "Employee ID": id,
-          "Employee Name": name,
-          "Task Done": done,
-        }))),
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
       });
-      alert("Synced to Google Sheets successfully!");
+      alert("Sync sent. Open the Google Sheet to confirm the rows. If nothing was added, redeploy the Apps Script web app with Execute as: Me and Who has access: Anyone, then replace the /exec URL in the app.");
     } catch {
-      alert("Failed to sync. Please try again.");
+      alert("Failed to reach Google Sheets. Check your connection and try again.");
     }
   }
-
+ 
   return (
     <div className="app">
       <header className="header">
@@ -73,12 +77,12 @@ function App() {
           Logout
         </button>
       </header>
-
+ 
       <main className="container">
         <section className="form-card">
           <h2>Add Employee Task</h2>
           <p className="subtitle">Enter employee details and completed work.</p>
-
+ 
           <form onSubmit={addTask}>
             <label htmlFor="empId">Employee ID</label>
             <input
@@ -89,7 +93,7 @@ function App() {
               placeholder="Enter employee ID"
               required
             />
-
+ 
             <label htmlFor="empName">Employee Name</label>
             <input
               id="empName"
@@ -99,7 +103,7 @@ function App() {
               placeholder="Enter employee name"
               required
             />
-
+ 
             <label htmlFor="task">Task Done</label>
             <textarea
               id="task"
@@ -109,13 +113,13 @@ function App() {
               rows={4}
               required
             />
-
+ 
             <button className="add-btn" type="submit">
               + Add Task
             </button>
           </form>
         </section>
-
+ 
         <section className="table-card">
           <div className="table-heading">
             <div>
@@ -126,7 +130,7 @@ function App() {
               Sync to Google Sheets
             </button>
           </div>
-
+ 
           <div className="table-wrapper">
             <table>
               <thead>
@@ -158,5 +162,6 @@ function App() {
     </div>
   );
 }
-
+ 
 export default App;
+ 
