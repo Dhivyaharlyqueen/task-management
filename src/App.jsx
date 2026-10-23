@@ -4,7 +4,7 @@ import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import "./App.css";
 
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyx_qfeR0NmiA1LJxKNH4eWqKNTknjBTiLTsEgc9cg9TvOeGf3eK-wE7YEOEIuC-k35Gg/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec";
 
 function App() {
   const [empId, setEmpId] = useState("");
@@ -42,20 +42,24 @@ function App() {
       alert("Please add at least one task");
       return;
     }
+    const payload = tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
+      "Employee ID": id,
+      "Employee Name": name,
+      "Task Done": done,
+    }));
     try {
+      // text/plain keeps this a simple request. Apps Script rejects the
+      // CORS preflight that application/json would trigger, and no-cors
+      // lets the browser follow Google's redirect.
       await fetch(APPS_SCRIPT_URL, {
         method: "POST",
         mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
-          "Employee ID": id,
-          "Employee Name": name,
-          "Task Done": done,
-        }))),
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
       });
-      alert("Synced to Google Sheets successfully!");
+      alert("Sync sent. Open the Google Sheet to confirm the rows. If nothing was added, redeploy the Apps Script web app with Execute as: Me and Who has access: Anyone, then replace the /exec URL in the app.");
     } catch {
-      alert("Failed to sync. Please try again.");
+      alert("Failed to reach Google Sheets. Check your connection and try again.");
     }
   }
 
