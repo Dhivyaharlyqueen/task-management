@@ -4,7 +4,7 @@ import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import "./App.css";
  
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec%22;
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec";
  
 function App() {
   const [empId, setEmpId] = useState("");
