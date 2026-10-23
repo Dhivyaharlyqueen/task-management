@@ -1,0 +1,154 @@
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #fff;
+  font-family: Arial, sans-serif;
+}
+
+.login-visual {
+  background: linear-gradient(145deg, #172554, #2563eb);
+  color: white;
+  padding: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.visual-content {
+  max-width: 430px;
+}
+
+.visual-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border: 1px solid #93c5fd;
+  border-radius: 16px;
+  font-size: 32px;
+  margin-bottom: 28px;
+}
+
+.visual-content h1 {
+  font-size: 42px;
+  line-height: 1.2;
+  margin-bottom: 18px;
+}
+
+.visual-content p {
+  color: #dbeafe;
+  line-height: 1.8;
+  font-size: 16px;
+}
+
+.visual-footer {
+  margin-top: 80px;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #bfdbfe;
+}
+
+.login-form-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 35px;
+  background: #f8fafc;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 390px;
+  background: white;
+  padding: 35px;
+  border-radius: 16px;
+  box-shadow: 0 10px 40px #0f172a0c;
+}
+
+.login-tag {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.login-card h2 {
+  font-size: 32px;
+  margin: 15px 0 10px;
+  color: #172554;
+}
+
+.login-description {
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 28px;
+}
+
+.login-card label {
+  display: block;
+  margin: 18px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-card input {
+  width: 100%;
+  padding: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.login-card input:focus {
+  outline: 2px solid #bfdbfe;
+  border-color: #2563eb;
+}
+
+.login-button {
+  width: 100%;
+  margin-top: 25px;
+  padding: 14px;
+  color: white;
+  background: #2563eb;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.login-button:hover {
+  background: #1d4ed8;
+}
+
+.login-note {
+  text-align: center;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 25px;
+}
+
+@media (max-width: 750px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .login-visual {
+    padding: 35px 25px;
+  }
+
+  .visual-content h1 {
+    font-size: 30px;
+  }
+
+  .visual-footer {
+    margin-top: 30px;
+  }
+
+  .login-form-side {
+    padding: 25px 16px;
+  }
+}
