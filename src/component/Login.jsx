@@ -7,6 +7,7 @@ import "../style/Login.css";
 function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const { snack, showSnack, closeSnack } = useSnackbar();
 
   async function handleLogin(e) {
@@ -22,47 +23,80 @@ function Login() {
     <div className="login-page">
       <div className="login-visual">
         <div className="visual-content">
-          <span className="visual-icon">✓</span>
-          <h1>Work. Track. Achieve.</h1>
-          <p>
-            Manage employee tasks and keep your
-            team's progress organized in one place.
-          </p>
-          <div className="visual-footer">EMPLOYEE TASK TRACKER</div>
+          <div className="login-brand">
+            <span className="login-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <rect x="4" y="3.5" width="16" height="17" rx="3" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            </span>
+            <span>Employee Task Tracker</span>
+          </div>
+          <h1>Track work in one place.</h1>
+          <p>Add tasks, keep the list up to date, and sync them with Google Sheets.</p>
+          <ul className="login-points">
+            <li>Record employee ID, name, and completed work</li>
+            <li>Review the full task list without leaving the page</li>
+            <li>Send updates to Google Sheets when you are ready</li>
+          </ul>
         </div>
       </div>
 
       <div className="login-form-side">
         <form className="login-card" onSubmit={handleLogin}>
-          <span className="login-tag">WELCOME BACK</span>
-          <h2>Sign in</h2>
-          <p className="login-description">
-            Enter your details to access your dashboard.
-          </p>
+          <div className="login-card-head">
+            <span className="login-mark login-mark-light" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+                <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <rect x="4" y="3.5" width="16" height="17" rx="3" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            </span>
+            <div>
+              <h2>Sign in</h2>
+              <p className="login-description">Use your work account to open the tracker.</p>
+            </div>
+          </div>
 
-          <label>Email</label>
-          <input
-            type="email"
-            placeholder="Enter email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+          <div className="field">
+            <label htmlFor="email">Email</label>
+            <div className="field-control">
+              <input
+                id="email"
+                type="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
+          </div>
 
-          <label>Password</label>
-          <input
-            type="password"
-            placeholder="Enter password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <div className="field-control">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="field-toggle"
+                onClick={() => setShowPassword((visible) => !visible)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </div>
 
           <button type="submit" className="login-button">
-            Sign In →
+            Sign in
           </button>
-
-          <p className="login-note">Employee Task Tracker</p>
         </form>
       </div>
       <Snackbar snack={snack} onClose={closeSnack} />

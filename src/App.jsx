@@ -159,14 +159,19 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <div>
-          <h1>Employee Task Tracker</h1>
-          <p>Manage employee work details</p>
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+              <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              <rect x="4" y="3.5" width="16" height="17" rx="3" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+          </span>
+          <div>
+            <h1>Employee Task Tracker</h1>
+            <p>Manage employee work details</p>
+          </div>
         </div>
-        <button
-          onClick={() => signOut(auth)}
-          style={{ padding: "8px 18px", cursor: "pointer", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", fontWeight: 600 }}
-        >
+        <button type="button" className="logout-btn" onClick={() => signOut(auth)}>
           Logout
         </button>
       </header>
@@ -217,7 +222,7 @@ function App() {
           <div className="table-heading">
             <div>
               <h2>Employee Task List</h2>
-              <p className="subtitle">Total tasks: {tasks.length}</p>
+              <p className="subtitle"><span className="count-pill">{tasks.length}</span> tasks</p>
             </div>
             <div className="sheet-actions">
               <button type="button" className="load-btn" onClick={() => loadFromSheets()} disabled={loadingSheets}>
