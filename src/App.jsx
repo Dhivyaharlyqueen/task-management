@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
@@ -6,16 +6,70 @@ import "./App.css";
  
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec";
  
+function taskKey(row) {
+  return ["Employee ID", "Employee Name", "Task Done"]
+    .map((field) => String(row[field] ?? "").trim())
+    .join("|");
+}
+ 
+function sheetRow(row) {
+  const item = {
+    "Employee ID": String(row["Employee ID"] ?? "").trim(),
+    "Employee Name": String(row["Employee Name"] ?? "").trim(),
+    "Task Done": String(row["Task Done"] ?? "").trim(),
+  };
+  if (!item["Employee ID"] && !item["Employee Name"] && !item["Task Done"]) return null;
+  return item;
+}
+ 
+function fetchSheetRows() {
+  return new Promise((resolve, reject) => {
+    const callbackName = `onSheetRows_${Date.now()}`;
+    const script = document.createElement("script");
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Google Sheets did not respond"));
+    }, 20000);
+ 
+    function cleanup() {
+      clearTimeout(timeout);
+      delete window[callbackName];
+      script.remove();
+    }
+ 
+    window[callbackName] = (rows) => {
+      cleanup();
+      resolve(Array.isArray(rows) ? rows : []);
+    };
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Could not read Google Sheets"));
+    };
+    script.src = `${APPS_SCRIPT_URL}?callback=${callbackName}`;
+    document.body.appendChild(script);
+  });
+}
+ 
 function App() {
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
   const [task, setTask] = useState("");
   const [tasks, setTasks] = useState([]);
+  const [loadingSheets, setLoadingSheets] = useState(false);
+  const tasksRef = useRef([]);
+  const importedRef = useRef(false);
+  const loadingRef = useRef(false);
  
   useEffect(() => {
     const q = query(collection(db, "tasks"), orderBy("createdAt"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTasks(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+      const next = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      tasksRef.current = next;
+      setTasks(next);
+      if (!importedRef.current) {
+        importedRef.current = true;
+        loadFromSheets(next, true);
+      }
     });
     return unsubscribe;
   }, []);
@@ -35,6 +89,43 @@ function App() {
     setEmpId("");
     setEmpName("");
     setTask("");
+  }
+ 
+  async function loadFromSheets(currentTasks = tasksRef.current, silent = false) {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setLoadingSheets(true);
+    try {
+      const rows = await fetchSheetRows();
+      const existing = new Set(currentTasks.map(taskKey));
+      const fresh = [];
+      rows.forEach((row) => {
+        const item = sheetRow(row);
+        if (!item) return;
+        const key = taskKey(item);
+        if (existing.has(key)) return;
+        existing.add(key);
+        fresh.push(item);
+      });
+      for (let index = 0; index < fresh.length; index += 1) {
+        await addDoc(collection(db, "tasks"), {
+          ...fresh[index],
+          createdAt: Date.now() + index,
+        });
+      }
+      if (fresh.length > 0) {
+        alert(`Added ${fresh.length} new task(s) from Google Sheets.`);
+      } else if (!silent) {
+        alert("No new tasks in Google Sheets.");
+      }
+    } catch {
+      if (!silent) {
+        alert("Could not read Google Sheets. Replace the Apps Script with the new code and deploy a new version.");
+      }
+    } finally {
+      loadingRef.current = false;
+      setLoadingSheets(false);
+    }
   }
  
   async function syncToSheets() {
@@ -126,9 +217,14 @@ function App() {
               <h2>Employee Task List</h2>
               <p className="subtitle">Total tasks: {tasks.length}</p>
             </div>
-            <button type="button" className="download-btn" onClick={syncToSheets}>
-              Sync to Google Sheets
-            </button>
+            <div className="sheet-actions">
+              <button type="button" className="load-btn" onClick={() => loadFromSheets()} disabled={loadingSheets}>
+                {loadingSheets ? "Loading..." : "Load from Google Sheets"}
+              </button>
+              <button type="button" className="download-btn" onClick={syncToSheets} disabled={loadingSheets}>
+                Sync to Google Sheets
+              </button>
+            </div>
           </div>
  
           <div className="table-wrapper">
@@ -164,4 +260,6 @@ function App() {
 }
  
 export default App;
+ 
+
  
