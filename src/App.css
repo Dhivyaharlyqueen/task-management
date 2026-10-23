@@ -18,46 +18,77 @@ body {
 
 .header {
   flex-shrink: 0;
-  background: linear-gradient(90deg, #0f172a 0%, #172554 70%, #1e3a8a 100%);
+  background: #0b1220;
   color: white;
-  padding: 14px 5%;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.header-inner {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  min-height: 56px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+}
+
+.brand-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-divider {
+  width: 1px;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.22);
+  flex-shrink: 0;
 }
 
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.1);
-  color: #bfdbfe;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.35);
   flex-shrink: 0;
+}
+
+.brand-mark svg {
+  width: 18px;
+  height: 18px;
 }
 
 .header h1 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .header p {
-  margin: 2px 0 0;
-  color: #cbd5e1;
+  margin: 0;
+  color: #94a3b8;
   font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .badge {
@@ -76,18 +107,23 @@ body {
 }
 
 .logout-btn {
-  background: #fff;
-  color: #0f172a;
-  border: none;
-  padding: 8px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  background: transparent;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 0 14px;
   border-radius: 999px;
   cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
   font-weight: 700;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
 }
 
 .logout-btn:hover {
-  background: #e2e8f0;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .container {
@@ -175,6 +211,11 @@ textarea {
   font-size: 14px;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8;
 }
 
 input:focus,
@@ -272,6 +313,7 @@ td {
   padding: 12px 14px;
   border-bottom: 1px solid #eef2f7;
   font-size: 14px;
+  color: #0f172a;
   overflow-wrap: anywhere;
 }
 
@@ -326,18 +368,14 @@ tbody tr:hover td {
     flex-direction: column;
   }
 
-  .header h1 {
-    font-size: 20px;
+  .brand-divider,
+  .header p {
+    display: none;
   }
 }
 
 @media (max-width: 600px) {
-  .header {
-    align-items: flex-start;
-  }
-
-  .header-actions {
-    align-items: flex-end;
-    flex-direction: column;
+  .header-inner {
+    align-items: center;
   }
 }

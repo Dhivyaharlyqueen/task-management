@@ -159,21 +159,24 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
-              <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              <rect x="4" y="3.5" width="16" height="17" rx="3" stroke="currentColor" strokeWidth="1.8" />
-            </svg>
-          </span>
-          <div>
-            <h1>Employee Task Tracker</h1>
-            <p>Manage employee work details</p>
+        <div className="header-inner">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none">
+                <path d="M8 7h8M8 12h8M8 17h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <rect x="4" y="3.5" width="16" height="17" rx="3" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+            </span>
+            <div className="brand-text">
+              <h1>Employee Task Tracker</h1>
+              <span className="brand-divider" aria-hidden="true" />
+              <p>Manage employee work details</p>
+            </div>
           </div>
+          <button type="button" className="logout-btn" onClick={() => signOut(auth)}>
+            Logout
+          </button>
         </div>
-        <button type="button" className="logout-btn" onClick={() => signOut(auth)}>
-          Logout
-        </button>
       </header>
 
       <main className="container">
