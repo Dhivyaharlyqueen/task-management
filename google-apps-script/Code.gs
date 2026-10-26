@@ -14,10 +14,13 @@ function doGet(e) {
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   var incoming = JSON.parse(e.postData.contents);
+  var headers = ["Record ID", "Date", "Employee ID", "Employee Name", "Task Done"];
   sheet.clearContents();
-  sheet.appendRow(["Employee ID", "Employee Name", "Task Done"]);
+  sheet.appendRow(headers);
   incoming.forEach(function (row) {
-    sheet.appendRow([row["Employee ID"], row["Employee Name"], row["Task Done"]]);
+    sheet.appendRow(headers.map(function (header) {
+      return row[header] == null ? "" : row[header];
+    }));
   });
   return ContentService.createTextOutput("ok");
 }
@@ -32,16 +35,15 @@ function readRows() {
   return values.slice(1).map(function (row) {
     var item = {};
     headers.forEach(function (header, index) {
-      if (header) item[header] = row[index];
+      if (!header) return;
+      var value = row[index];
+      if (Object.prototype.toString.call(value) === "[object Date]") {
+        value = Utilities.formatDate(value, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      }
+      item[header] = value;
     });
     return item;
   }).filter(function (item) {
-    return String(item["Employee ID"] || item["Employee Name"] || item["Task Done"] || "").trim() !== "";
+    return String(item["Record ID"] || item.Date || item["Employee ID"] || item["Employee Name"] || item["Task Done"] || "").trim() !== "";
   });
-}
-
-function taskKey(row) {
-  return ["Employee ID", "Employee Name", "Task Done"].map(function (field) {
-    return String(row[field] == null ? "" : row[field]).trim();
-  }).join("|");
 }
