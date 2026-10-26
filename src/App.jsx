@@ -7,6 +7,26 @@ import "./App.css";
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec";
 
+function formatDate(value) {
+  if (!value) return "";
+
+  const dateString = String(value).trim();
+
+  // Already DD/MM/YYYY format
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateString)) {
+    return dateString;
+  }
+
+  // ISO format: 2026-10-24T18:30:00.000Z
+  const match = dateString.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    return `${match[3]}/${match[2]}/${match[1]}`;
+  }
+
+  return dateString;
+}
+
 function taskKey(row) {
   return ["Employee ID", "Employee Name", "Task Done"]
     .map((field) => String(row[field] ?? "").trim())
@@ -15,11 +35,12 @@ function taskKey(row) {
 
 function sheetRow(row) {
   const item = {
+     "Date": String(row["Date"] ?? "").trim(),
     "Employee ID": String(row["Employee ID"] ?? "").trim(),
     "Employee Name": String(row["Employee Name"] ?? "").trim(),
     "Task Done": String(row["Task Done"] ?? "").trim(),
   };
-  if (!item["Employee ID"] && !item["Employee Name"] && !item["Task Done"]) return null;
+  if ( !item["Date"] &&!item["Employee ID"] && !item["Employee Name"] && !item["Task Done"]) return null;
   return item;
 }
 
@@ -100,6 +121,7 @@ function App() {
       return;
     }
     const data = {
+        "Date": new Date().toLocaleDateString("en-GB"),
       "Employee ID": empId.trim(),
       "Employee Name": empName.trim(),
       "Task Done": task.trim(),
@@ -166,10 +188,11 @@ function App() {
       showSnack("Please add at least one task", "error");
       return;
     }
-    const payload = tasks.map(({ "Employee ID": id, "Employee Name": name, "Task Done": done }) => ({
-      "Employee ID": id,
-      "Employee Name": name,
-      "Task Done": done,
+   const payload = tasks.map((item) => ({
+  "Date": item["Date"] || "",
+  "Employee ID": item["Employee ID"] || "",
+  "Employee Name": item["Employee Name"] || "",
+  "Task Done": item["Task Done"] || "",
     }));
     try {
       // text/plain keeps this a simple request. Apps Script rejects the
@@ -247,6 +270,7 @@ function App() {
               rows={4}
               required
             />
+            
 
             <div className="form-actions">
               <button className="add-btn" type="submit">
@@ -281,6 +305,7 @@ function App() {
             <table>
               <thead>
                 <tr>
+                  <th>Date</th>
                   <th>Employee ID</th>
                   <th>Employee Name</th>
                   <th>Task Done</th>
@@ -290,11 +315,12 @@ function App() {
               <tbody>
                 {tasks.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="empty">No tasks added yet</td>
+                    <td colSpan={5} className="empty">No tasks added yet</td>
                   </tr>
                 ) : (
                   tasks.map((item) => (
                     <tr key={item.id}>
+                     <td>{formatDate(item["Date"])}</td>
                       <td>{item["Employee ID"]}</td>
                       <td>{item["Employee Name"]}</td>
                       <td>{item["Task Done"]}</td>
