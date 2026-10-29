@@ -6,6 +6,11 @@ import Snackbar, { useSnackbar } from "./component/Snackbar";
 import "./App.css";
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfvYsnmjMhWF7f-WRFU83vkNjrSz-lXrw5pTqlOvA42FaiHiu8bUUUuWlBqdQwtio_KA/exec";
+const ADMIN_EMAIL = "admin@hepl.com";
+
+function isAdminEmail(email) {
+  return String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
+}
 
 const AVATAR_PALETTES = [
   { bg: "#e0f2fe", color: "#0284c7" }, // Blue
@@ -125,19 +130,33 @@ function todayInputDate() {
 
 function sheetRow(row) {
   const item = {
-    "Record ID": String(row["Record ID"] ?? "").trim(),
+    "Record ID": String(row["Record ID"] ?? row["Task ID"] ?? "").trim(),
     Date: formatDate(row.Date),
+    Project: String(row.Project ?? "").trim(),
     "Employee ID": String(row["Employee ID"] ?? "").trim(),
     "Employee Name": String(row["Employee Name"] ?? "").trim(),
     "Task Done": String(row["Task Done"] ?? "").trim(),
+    "User Email": String(row["User Email"] ?? "").trim(),
   };
-  if (!item.Date && !item["Employee ID"] && !item["Employee Name"] && !item["Task Done"]) return null;
+  if (!item.Date && !item.Project && !item["Employee ID"] && !item["Employee Name"] && !item["Task Done"]) return null;
   return item;
 }
 
-function fetchSheetRows() {
+function fieldsFromSheet(item) {
+  const fields = {
+    Date: item.Date,
+    Project: item.Project,
+    "Employee ID": item["Employee ID"],
+    "Employee Name": item["Employee Name"],
+    "Task Done": item["Task Done"],
+  };
+  if (item["User Email"]) fields.userEmail = item["User Email"];
+  return fields;
+}
+
+function fetchSheetRows(sheet) {
   return new Promise((resolve, reject) => {
-    const callbackName = `onSheetRows_${Date.now()}`;
+    const callbackName = `onSheetRows_${Date.now()}_${sheet || "tasks"}`;
     const script = document.createElement("script");
     const timeout = setTimeout(() => {
       cleanup();
@@ -158,15 +177,34 @@ function fetchSheetRows() {
       cleanup();
       reject(new Error("Could not read Google Sheets"));
     };
-    script.src = `${APPS_SCRIPT_URL}?callback=${callbackName}`;
+    const sheetQuery = sheet ? `&sheet=${encodeURIComponent(sheet)}` : "";
+    script.src = `${APPS_SCRIPT_URL}?callback=${callbackName}${sheetQuery}`;
     document.body.appendChild(script);
   });
 }
 
+async function postToSheet(body) {
+  await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify(body),
+  });
+}
+
 function App() {
+  const currentUser = auth.currentUser;
+  const isAdmin = isAdminEmail(currentUser?.email);
   const [empId, setEmpId] = useState("");
   const [empName, setEmpName] = useState("");
   const [task, setTask] = useState("");
+  const [project, setProject] = useState("");
+  const [projectName, setProjectName] = useState("");
+  const [projects, setProjects] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [userEmpId, setUserEmpId] = useState("");
+  const [userEmpName, setUserEmpName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
   const [taskDate, setTaskDate] = useState(todayInputDate);
   const [tasks, setTasks] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -176,6 +214,8 @@ function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const { snack, showSnack, closeSnack } = useSnackbar();
   const tasksRef = useRef([]);
+  const employeesRef = useRef([]);
+  const projectsRef = useRef([]);
   const importedRef = useRef(false);
   const loadingRef = useRef(false);
 
@@ -185,12 +225,30 @@ function App() {
       const next = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       tasksRef.current = next;
       setTasks(next);
-      if (!importedRef.current) {
+      if (isAdmin && !importedRef.current) {
         importedRef.current = true;
         loadFromSheets(next, true);
       }
     });
     return unsubscribe;
+  }, [isAdmin]);
+
+  useEffect(() => {
+    const q = query(collection(db, "projects"), orderBy("createdAt"));
+    return onSnapshot(q, (snapshot) => {
+      const next = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      projectsRef.current = next;
+      setProjects(next);
+    });
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, "employees"), orderBy("createdAt"));
+    return onSnapshot(q, (snapshot) => {
+      const next = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+      employeesRef.current = next;
+      setEmployees(next);
+    });
   }, []);
 
   function clearForm() {
@@ -198,6 +256,7 @@ function App() {
     setEmpId("");
     setEmpName("");
     setTask("");
+    setProject("");
     setTaskDate(todayInputDate());
   }
 
@@ -206,18 +265,102 @@ function App() {
     setEmpId(item["Employee ID"] ?? "");
     setEmpName(item["Employee Name"] ?? "");
     setTask(item["Task Done"] ?? "");
+    setProject(item.Project ?? "");
     setTaskDate(toInputDate(item.Date || item.createdAt) || todayInputDate());
     setConfirmId(null);
   }
 
+  async function addProject(e) {
+    e.preventDefault();
+    const name = projectName.trim();
+    if (!name) {
+      showSnack("Enter a project name", "error");
+      return;
+    }
+    const exists = projects.some((item) => String(item.name).trim().toLowerCase() === name.toLowerCase());
+    if (exists) {
+      showSnack("That project already exists", "info");
+      return;
+    }
+    await addDoc(collection(db, "projects"), {
+      name,
+      createdAt: Date.now(),
+      createdBy: currentUser?.email || ADMIN_EMAIL,
+    });
+    setProjectName("");
+    await syncProjects([...projectsRef.current, { name }]);
+    showSnack("Project added", "success");
+  }
+
+  async function removeProject(id) {
+    await deleteDoc(doc(db, "projects", id));
+    await syncProjects(projectsRef.current.filter((item) => item.id !== id));
+    showSnack("Project removed", "success");
+  }
+
+  async function addEmployee(e) {
+    e.preventDefault();
+    const employeeId = userEmpId.trim();
+    const employeeName = userEmpName.trim();
+    const email = userEmail.trim();
+    if (!employeeId || !employeeName || !email) {
+      showSnack("Enter employee ID, name, and email", "error");
+      return;
+    }
+    const exists = employees.some((item) => String(item["Email ID"] || "").trim().toLowerCase() === email.toLowerCase());
+    if (exists) {
+      showSnack("That email is already added", "info");
+      return;
+    }
+    const data = {
+      "Employee ID": employeeId,
+      "Employee Name": employeeName,
+      "Email ID": email,
+    };
+    await addDoc(collection(db, "employees"), {
+      ...data,
+      createdAt: Date.now(),
+    });
+    setUserEmpId("");
+    setUserEmpName("");
+    setUserEmail("");
+    await syncUsers([...employeesRef.current, data]);
+    showSnack("User added", "success");
+  }
+
+  async function removeEmployee(id) {
+    await deleteDoc(doc(db, "employees", id));
+    await syncUsers(employeesRef.current.filter((item) => item.id !== id));
+    showSnack("User removed", "success");
+  }
+
+  function syncUsers(list) {
+    return postToSheet({
+      action: "saveUsers",
+      rows: list.map((item) => ({
+        "Employee ID": item["Employee ID"] || "",
+        "Employee Name": item["Employee Name"] || "",
+        "Email ID": item["Email ID"] || "",
+      })),
+    });
+  }
+
+  function syncProjects(list) {
+    return postToSheet({
+      action: "saveProjects",
+      rows: list.map((item) => ({ "Project Name": item.name || "" })),
+    });
+  }
+
   async function addTask(e) {
     e.preventDefault();
-    if (!taskDate || !empId.trim() || !empName.trim() || !task.trim()) {
-      showSnack("Please fill all fields", "error");
+    if (!taskDate || !project || !empId.trim() || !empName.trim() || !task.trim()) {
+      showSnack(projects.length === 0 ? "Ask the admin to add a project first" : "Please fill all fields", "error");
       return;
     }
     const data = {
       Date: fromInputDate(taskDate),
+      Project: project,
       "Employee ID": empId.trim(),
       "Employee Name": empName.trim(),
       "Task Done": task.trim(),
@@ -228,6 +371,7 @@ function App() {
     } else {
       await addDoc(collection(db, "tasks"), {
         ...data,
+        userEmail: currentUser?.email || "",
         createdAt: Date.now(),
       });
       showSnack("Task added", "success");
@@ -242,11 +386,62 @@ function App() {
     showSnack("Task deleted", "success");
   }
 
+  async function importDirectories() {
+    const [userRows, projectRows] = await Promise.all([
+      fetchSheetRows("users"),
+      fetchSheetRows("projects"),
+    ]);
+    let userAdded = 0;
+    let projectAdded = 0;
+
+    for (const row of userRows) {
+      if (!Object.prototype.hasOwnProperty.call(row, "Email ID")) continue;
+      const data = {
+        "Employee ID": String(row["Employee ID"] ?? "").trim(),
+        "Employee Name": String(row["Employee Name"] ?? "").trim(),
+        "Email ID": String(row["Email ID"] ?? "").trim(),
+      };
+      if (!data["Employee ID"] && !data["Employee Name"] && !data["Email ID"]) continue;
+      const match = employeesRef.current.find((item) =>
+        (data["Email ID"] && String(item["Email ID"] || "").trim().toLowerCase() === data["Email ID"].toLowerCase())
+        || (data["Employee ID"] && String(item["Employee ID"] || "").trim() === data["Employee ID"])
+      );
+      if (match) {
+        const changed = ["Employee ID", "Employee Name", "Email ID"].some(
+          (field) => String(match[field] || "").trim() !== data[field]
+        );
+        if (changed) await updateDoc(doc(db, "employees", match.id), data);
+        continue;
+      }
+      await addDoc(collection(db, "employees"), { ...data, createdAt: Date.now() + userAdded });
+      employeesRef.current = [...employeesRef.current, data];
+      userAdded += 1;
+    }
+
+    for (const row of projectRows) {
+      if (!Object.prototype.hasOwnProperty.call(row, "Project Name")) continue;
+      const name = String(row["Project Name"] ?? "").trim();
+      if (!name) continue;
+      const exists = projectsRef.current.some((item) => String(item.name || "").trim().toLowerCase() === name.toLowerCase());
+      if (exists) continue;
+      await addDoc(collection(db, "projects"), {
+        name,
+        createdAt: Date.now() + projectAdded,
+        createdBy: currentUser?.email || ADMIN_EMAIL,
+      });
+      projectsRef.current = [...projectsRef.current, { name }];
+      projectAdded += 1;
+    }
+
+    return { userAdded, projectAdded };
+  }
+
   async function loadFromSheets(currentTasks = tasksRef.current, silent = false) {
     if (loadingRef.current) return;
     loadingRef.current = true;
     setLoadingSheets(true);
     try {
+      const directory = await importDirectories();
       const rows = await fetchSheetRows();
       const sheetItems = [];
       const seenInSheet = new Set();
@@ -283,9 +478,10 @@ function App() {
       async function applyToExisting(existing, data) {
         matched.add(existing.id);
         if (!data.Date) data.Date = formatDate(existing.Date || existing.createdAt);
-        const changed = ["Date", "Employee ID", "Employee Name", "Task Done"].some(
+        if (!data.Project) data.Project = existing.Project || "";
+        const changed = ["Date", "Project", "Employee ID", "Employee Name", "Task Done"].some(
           (field) => String(field === "Date" ? formatDate(existing.Date || existing.createdAt) : existing[field] ?? "").trim() !== data[field]
-        );
+        ) || (data.userEmail && data.userEmail !== String(existing.userEmail || "").trim());
         if (changed) {
           await updateDoc(doc(db, "tasks", existing.id), data);
           updated += 1;
@@ -294,12 +490,7 @@ function App() {
 
       const pendingSheet = [];
       for (const item of sheetItems) {
-        const data = {
-          Date: item.Date,
-          "Employee ID": item["Employee ID"],
-          "Employee Name": item["Employee Name"],
-          "Task Done": item["Task Done"],
-        };
+        const data = fieldsFromSheet(item);
         const existing = item["Record ID"] && byId.has(item["Record ID"])
           ? byId.get(item["Record ID"])
           : byIdentity.get(rowIdentity(data));
@@ -314,12 +505,7 @@ function App() {
       let pendingApp = keepers.filter((item) => !matched.has(item.id));
       let paired = takeUniquePairs(pendingSheet, pendingApp, looseKey);
       for (const [item, existing] of paired.pairs) {
-        await applyToExisting(existing, {
-          Date: item.Date,
-          "Employee ID": item["Employee ID"],
-          "Employee Name": item["Employee Name"],
-          "Task Done": item["Task Done"],
-        });
+        await applyToExisting(existing, fieldsFromSheet(item));
       }
       paired = takeUniquePairs(
         paired.sheetLeft,
@@ -327,30 +513,17 @@ function App() {
         (item) => String(item["Employee ID"] ?? "").trim()
       );
       for (const [item, existing] of paired.pairs) {
-        await applyToExisting(existing, {
-          Date: item.Date,
-          "Employee ID": item["Employee ID"],
-          "Employee Name": item["Employee Name"],
-          "Task Done": item["Task Done"],
-        });
+        await applyToExisting(existing, fieldsFromSheet(item));
       }
       if (paired.sheetLeft.length === 1 && paired.appLeft.length === 1) {
         const item = paired.sheetLeft[0];
-        await applyToExisting(paired.appLeft[0], {
-          Date: item.Date,
-          "Employee ID": item["Employee ID"],
-          "Employee Name": item["Employee Name"],
-          "Task Done": item["Task Done"],
-        });
+        await applyToExisting(paired.appLeft[0], fieldsFromSheet(item));
         paired.sheetLeft = [];
       }
 
       for (const item of paired.sheetLeft) {
         await addDoc(collection(db, "tasks"), {
-          Date: item.Date,
-          "Employee ID": item["Employee ID"],
-          "Employee Name": item["Employee Name"],
-          "Task Done": item["Task Done"],
+          ...fieldsFromSheet(item),
           createdAt: Date.now() + added,
         });
         added += 1;
@@ -386,11 +559,13 @@ function App() {
         await deleteDoc(doc(db, "tasks", id));
       }
 
-      if (updated > 0 || added > 0 || removeIds.length > 0) {
+      if (updated > 0 || added > 0 || removeIds.length > 0 || directory.userAdded > 0 || directory.projectAdded > 0) {
         const parts = [];
         if (updated > 0) parts.push(`Updated ${updated} task(s)`);
         if (added > 0) parts.push(`added ${added} new task(s)`);
         if (removeIds.length > 0) parts.push(`removed ${removeIds.length} duplicate task(s)`);
+        if (directory.userAdded > 0) parts.push(`added ${directory.userAdded} user(s)`);
+        if (directory.projectAdded > 0) parts.push(`added ${directory.projectAdded} project(s)`);
         showSnack(`${parts.join(", ")} from Google Sheets.`, "success");
       } else if (!silent) {
         showSnack("No changes in Google Sheets.", "info");
@@ -406,36 +581,47 @@ function App() {
   }
 
   async function syncToSheets() {
-    if (tasks.length === 0) {
-      showSnack("Please add at least one task", "error");
+    if (tasks.length === 0 && employees.length === 0 && projects.length === 0) {
+      showSnack("Add a task, user, or project first", "error");
       return;
     }
     const payload = tasks.map((item) => ({
       "Record ID": item.id,
+      "Task ID": item.id,
       Date: item.Date || formatDate(item.createdAt),
+      Project: item.Project || "",
       "Employee ID": item["Employee ID"] || "",
       "Employee Name": item["Employee Name"] || "",
       "Task Done": item["Task Done"] || "",
+      "User Email": item.userEmail || "",
     }));
     try {
-      await fetch(APPS_SCRIPT_URL, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload),
-      });
-      showSnack("Sync sent. Open the Google Sheet to confirm the rows.", "success");
+      await postToSheet(payload);
+      await syncUsers(employees);
+      await syncProjects(projects);
+      showSnack("Tasks, users, and projects sent to Google Sheets.", "success");
     } catch {
       showSnack("Failed to reach Google Sheets. Check your connection and try again.", "error");
     }
   }
 
-  const filteredTasks = tasks.filter((item) => {
+  const accountEmail = String(currentUser?.email || "").toLowerCase();
+  const visibleTasks = isAdmin
+    ? tasks
+    : tasks.filter((item) => String(item.userEmail || "").toLowerCase() === accountEmail);
+  const projectChoices = projects.map((item) => item.name);
+  if (project && !projectChoices.some((name) => name.toLowerCase() === project.toLowerCase())) {
+    projectChoices.unshift(project);
+  }
+
+  const filteredTasks = visibleTasks.filter((item) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.trim().toLowerCase();
     const id = String(item["Employee ID"] ?? "").toLowerCase();
     const name = String(item["Employee Name"] ?? "").toLowerCase();
-    return id.includes(term) || name.includes(term);
+    const projectNameValue = String(item.Project ?? "").toLowerCase();
+    const owner = String(item.userEmail ?? "").toLowerCase();
+    return id.includes(term) || name.includes(term) || projectNameValue.includes(term) || owner.includes(term);
   });
 
   const totalRecords = filteredTasks.length;
@@ -478,10 +664,10 @@ function App() {
                   <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
                 </svg>
               </div>
-              <span className="user-name">Hello, Team</span>
-              <svg className="chevron-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m6 9 6 6 6-6" />
-              </svg>
+              <span className="user-meta">
+                <span className="user-name">{isAdmin ? "Admin" : currentUser?.email}</span>
+                <span className="role-pill">{isAdmin ? "Admin portal" : "User portal"}</span>
+              </span>
             </div>
 
             <button type="button" className="logout-btn" onClick={() => signOut(auth)}>
@@ -511,10 +697,88 @@ function App() {
             <div className="card-header-text">
               <h2>{editingId ? "Edit Employee Task" : "Add Employee Task"}</h2>
               <p className="subtitle">
-                {editingId ? "Update the selected task, then save." : "Enter employee details and completed work."}
+                {isAdmin
+                  ? "Add users and projects, then record a task."
+                  : "Choose a project and record your own task."}
               </p>
             </div>
           </div>
+
+          {isAdmin && (
+            <form onSubmit={addEmployee} className="project-form">
+              <label className="form-label" htmlFor="userEmpId">User details</label>
+              <input
+                id="userEmpId"
+                type="text"
+                value={userEmpId}
+                onChange={(e) => setUserEmpId(e.target.value)}
+                placeholder="Employee ID"
+                className="form-input"
+              />
+              <input
+                id="userEmpName"
+                type="text"
+                value={userEmpName}
+                onChange={(e) => setUserEmpName(e.target.value)}
+                placeholder="Employee name"
+                className="form-input"
+              />
+              <div className="project-add-row">
+                <input
+                  id="userEmail"
+                  type="email"
+                  value={userEmail}
+                  onChange={(e) => setUserEmail(e.target.value)}
+                  placeholder="Email ID"
+                  className="form-input"
+                />
+                <button className="project-add-btn" type="submit">Add User</button>
+              </div>
+              {employees.length > 0 && (
+                <div className="project-list">
+                  {employees.map((item) => (
+                    <span key={item.id} className="project-chip">
+                      {item["Employee Name"]} · {item["Email ID"]}
+                      <button type="button" onClick={() => removeEmployee(item.id)} aria-label={`Remove ${item["Employee Name"]}`}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </form>
+          )}
+
+          {isAdmin && (
+            <form onSubmit={addProject} className="project-form">
+              <label htmlFor="projectName" className="form-label">
+                <span>Project name</span>
+              </label>
+              <div className="project-add-row">
+                <input
+                  id="projectName"
+                  type="text"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  placeholder="Enter project name"
+                  className="form-input"
+                />
+                <button className="project-add-btn" type="submit">Add Project</button>
+              </div>
+              {projects.length > 0 && (
+                <div className="project-list">
+                  {projects.map((item) => (
+                    <span key={item.id} className="project-chip">
+                      {item.name}
+                      <button type="button" onClick={() => removeProject(item.id)} aria-label={`Remove ${item.name}`}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </form>
+          )}
 
           <form onSubmit={addTask} className="task-form">
             {/* Field 1: Date */}
@@ -536,6 +800,24 @@ function App() {
                 className="form-input"
                 required
               />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="project" className="form-label">
+                <span>Project</span>
+              </label>
+              <select
+                id="project"
+                value={project}
+                onChange={(e) => setProject(e.target.value)}
+                className="form-input"
+                required
+              >
+                <option value="">Select a project</option>
+                {projectChoices.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
             </div>
 
             {/* Field 2: Employee ID */}
@@ -624,6 +906,7 @@ function App() {
            
             </div>
 
+            {isAdmin && (
             <div className="sheet-actions">
               <button
                 type="button"
@@ -654,6 +937,7 @@ function App() {
                 <span>Sync to Google Sheets</span>
               </button>
             </div>
+            )}
              <div className="search-input-wrapper">
               <svg className="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="11" cy="11" r="8" />
@@ -733,15 +1017,17 @@ function App() {
                   <th className="th-sno">S.NO</th>
                   <th>Employee ID</th>
                   <th>Employee Name</th>
+                  <th>Project</th>
                   <th>Task Done</th>
                   <th>Date</th>
+                  {isAdmin && <th>User</th>}
                   <th className="th-actions">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {currentTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="empty-state">
+                    <td colSpan={isAdmin ? 8 : 7} className="empty-state">
                       {searchTerm.trim() ? "No matching tasks found" : "No tasks added yet"}
                     </td>
                   </tr>
@@ -768,6 +1054,7 @@ function App() {
                           </div>
                         </td>
                         <td className="emp-name-cell">{item["Employee Name"]}</td>
+                        <td className="project-cell">{item.Project || "—"}</td>
                         <td className="task-done-cell">{item["Task Done"]}</td>
                         <td>
                           <div className="date-cell">
@@ -780,6 +1067,7 @@ function App() {
                             <span>{formatDate(item["Date"])}</span>
                           </div>
                         </td>
+                        {isAdmin && <td className="user-cell">{item.userEmail || "—"}</td>}
                         <td>
                           <div className="row-actions">
                             <button
