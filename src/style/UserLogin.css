@@ -1,0 +1,26 @@
+
+@import "./Login.css";
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.login-card {
+  width: min(100%, 28rem);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.login-card input,
+.login-card button {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem;
+}
+
+.login-error {
+  color: #b42318;
+}
