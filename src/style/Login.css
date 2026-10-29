@@ -8,7 +8,7 @@ body:has(.login-page) {
   overflow: hidden;
   display: grid;
   grid-template-columns: 1.05fr 0.95fr;
-  background: #eef2f7;
+  background: #dee0e4;
   font-family: "Segoe UI", system-ui, sans-serif;
   color: #0f172a;
 }
@@ -197,11 +197,8 @@ form.login-card {
   color: #94a3b8;
 }
 
-.login-card input:-webkit-autofill {
-  -webkit-text-fill-color: #f8fafc;
-  caret-color: #f8fafc;
-  box-shadow: 0 0 0 1000px #1e293b inset;
-}
+
+
 
 .login-card input:focus {
   background: rgba(15, 23, 42, 0.9);

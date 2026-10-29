@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, where, getDocs } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import Snackbar, { useSnackbar } from "./component/Snackbar";
@@ -200,7 +200,21 @@ function App() {
   const [task, setTask] = useState("");
   const [project, setProject] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [projects, setProjects] = useState([]);
+  const [projects, setProjects] = useState(() => {
+    try {
+      const saved = localStorage.getItem("saved_projects");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [projectSearch, setProjectSearch] = useState("");
+  const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
+  const projectDropdownRef = useRef(null);
+  const [adminSelectedProject, setAdminSelectedProject] = useState("");
+  const [adminProjectSearch, setAdminProjectSearch] = useState("");
+  const [isAdminProjectDropdownOpen, setIsAdminProjectDropdownOpen] = useState(false);
+  const adminProjectDropdownRef = useRef(null);
   const [employees, setEmployees] = useState([]);
   const [userEmpId, setUserEmpId] = useState("");
   const [userEmpName, setUserEmpName] = useState("");
@@ -239,8 +253,38 @@ function App() {
       const next = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       projectsRef.current = next;
       setProjects(next);
+      try {
+        localStorage.setItem("saved_projects", JSON.stringify(next));
+      } catch {
+        // ignore
+      }
     });
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(event.target)) {
+        setIsProjectDropdownOpen(false);
+      }
+      if (adminProjectDropdownRef.current && !adminProjectDropdownRef.current.contains(event.target)) {
+        setIsAdminProjectDropdownOpen(false);
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsProjectDropdownOpen(false);
+        setIsAdminProjectDropdownOpen(false);
+      }
+    }
+    if (isProjectDropdownOpen || isAdminProjectDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isProjectDropdownOpen, isAdminProjectDropdownOpen]);
 
   useEffect(() => {
     const q = query(collection(db, "employees"), orderBy("createdAt"));
@@ -277,25 +321,94 @@ function App() {
       showSnack("Enter a project name", "error");
       return;
     }
-    const exists = projects.some((item) => String(item.name).trim().toLowerCase() === name.toLowerCase());
+    const exists = projects.some(
+      (item) => String(item?.name || item).trim().toLowerCase() === name.toLowerCase()
+    );
     if (exists) {
       showSnack("That project already exists", "info");
       return;
     }
-    await addDoc(collection(db, "projects"), {
-      name,
-      createdAt: Date.now(),
-      createdBy: currentUser?.email || ADMIN_EMAIL,
-    });
-    setProjectName("");
-    await syncProjects([...projectsRef.current, { name }]);
-    showSnack("Project added", "success");
+    try {
+      const docRef = await addDoc(collection(db, "projects"), {
+        name,
+        createdAt: Date.now(),
+        createdBy: currentUser?.email || ADMIN_EMAIL,
+      });
+      const newProj = { id: docRef.id, name, createdAt: Date.now() };
+      projectsRef.current = [...projectsRef.current, newProj];
+      setProjects((prev) => {
+        if (prev.some((p) => String(p?.name || p).trim().toLowerCase() === name.toLowerCase())) {
+          return prev;
+        }
+        return [...prev, newProj];
+      });
+      try {
+        localStorage.setItem("saved_projects", JSON.stringify(projectsRef.current));
+      } catch {
+        // ignore
+      }
+      setProjectName("");
+      setAdminSelectedProject(name);
+      setProject(name);
+      await syncProjects(projectsRef.current);
+      showSnack("Project added", "success");
+    } catch (err) {
+      console.error("Error adding project:", err);
+      const newProj = { id: `local_${Date.now()}`, name, createdAt: Date.now() };
+      projectsRef.current = [...projectsRef.current, newProj];
+      setProjects((prev) => [...prev, newProj]);
+      try {
+        localStorage.setItem("saved_projects", JSON.stringify(projectsRef.current));
+      } catch {
+        // ignore
+      }
+      setProjectName("");
+      setAdminSelectedProject(name);
+      setProject(name);
+      showSnack("Project added", "success");
+    }
   }
 
-  async function removeProject(id) {
-    await deleteDoc(doc(db, "projects", id));
-    await syncProjects(projectsRef.current.filter((item) => item.id !== id));
-    showSnack("Project removed", "success");
+  async function handleDeleteProject(e, projectName) {
+    e.stopPropagation();
+    if (!isAdmin) return;
+
+    try {
+      const matches = projects.filter(
+        (item) => String(item?.name || item).trim().toLowerCase() === projectName.trim().toLowerCase()
+      );
+      for (const m of matches) {
+        if (m?.id && !String(m.id).startsWith("local_")) {
+          await deleteDoc(doc(db, "projects", m.id));
+        }
+      }
+      const q = query(collection(db, "projects"), where("name", "==", projectName.trim()));
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await deleteDoc(d.ref);
+      }
+    } catch (err) {
+      console.error("Error removing project from Firestore:", err);
+    }
+
+    const updated = projectsRef.current.filter(
+      (item) => String(item?.name || item).trim().toLowerCase() !== projectName.trim().toLowerCase()
+    );
+    projectsRef.current = updated;
+    setProjects(updated);
+    try {
+      localStorage.setItem("saved_projects", JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+    if (adminSelectedProject.trim().toLowerCase() === projectName.trim().toLowerCase()) {
+      setAdminSelectedProject("");
+    }
+    if (project.trim().toLowerCase() === projectName.trim().toLowerCase()) {
+      setProject("");
+    }
+    await syncProjects(updated);
+    showSnack("Project deleted", "success");
   }
 
   async function addEmployee(e) {
@@ -609,10 +722,24 @@ function App() {
   const visibleTasks = isAdmin
     ? tasks
     : tasks.filter((item) => String(item.userEmail || "").toLowerCase() === accountEmail);
-  const projectChoices = projects.map((item) => item.name);
-  if (project && !projectChoices.some((name) => name.toLowerCase() === project.toLowerCase())) {
-    projectChoices.unshift(project);
+  const projectChoices = Array.from(
+    new Map(
+      projects
+        .map((item) => (typeof item === "string" ? item : item?.name))
+        .filter((name) => Boolean(name && String(name).trim()))
+        .map((name) => [name.trim().toLowerCase(), name.trim()])
+    ).values()
+  );
+  if (project && !projectChoices.some((name) => name.toLowerCase() === project.trim().toLowerCase())) {
+    projectChoices.unshift(project.trim());
   }
+
+  const filteredProjects = projectChoices.filter((name) =>
+    name.toLowerCase().includes(projectSearch.trim().toLowerCase())
+  );
+  const filteredAdminProjects = projectChoices.filter((name) =>
+    name.toLowerCase().includes(adminProjectSearch.trim().toLowerCase())
+  );
 
   const filteredTasks = visibleTasks.filter((item) => {
     if (!searchTerm.trim()) return true;
@@ -765,23 +892,291 @@ function App() {
                 />
                 <button className="project-add-btn" type="submit">Add Project</button>
               </div>
-              {projects.length > 0 && (
-                <div className="project-list">
-                  {projects.map((item) => (
-                    <span key={item.id} className="project-chip">
-                      {item.name}
-                      <button type="button" onClick={() => removeProject(item.id)} aria-label={`Remove ${item.name}`}>
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+              <div className="project-dropdown-group" ref={adminProjectDropdownRef}>
+                <button
+                  type="button"
+                  id="admin-project-trigger"
+                  className={`project-dropdown-trigger ${isAdminProjectDropdownOpen ? "active" : ""} ${!adminSelectedProject ? "placeholder" : ""}`}
+                  onClick={() => {
+                    setIsAdminProjectDropdownOpen((prev) => !prev);
+                    setAdminProjectSearch("");
+                  }}
+                  aria-haspopup="listbox"
+                  aria-expanded={isAdminProjectDropdownOpen}
+                >
+                  <span className="project-trigger-text">
+                    {adminSelectedProject || "Select a project"}
+                  </span>
+                  <svg
+                    className="project-dropdown-arrow"
+                    viewBox="0 0 24 24"
+                    width="18"
+                    height="18"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points={isAdminProjectDropdownOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+                  </svg>
+                </button>
+
+                {isAdminProjectDropdownOpen && (
+                  <div className="project-dropdown-menu" role="listbox">
+                    <div className="project-search-wrapper">
+                      <svg
+                        className="project-search-icon"
+                        viewBox="0 0 24 24"
+                        width="15"
+                        height="15"
+                        fill="none"
+                        stroke="#94a3b8"
+                        strokeWidth="2.2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="11" cy="11" r="8" />
+                        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                      </svg>
+                      <input
+                        type="text"
+                        className="project-search-input"
+                        placeholder="Search project..."
+                        value={adminProjectSearch}
+                        onChange={(e) => setAdminProjectSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="project-options-list">
+                      {filteredAdminProjects.length === 0 ? (
+                        <div className="project-empty-item">No projects found</div>
+                      ) : (
+                        filteredAdminProjects.map((name) => (
+                          <div
+                            key={name}
+                            className={`project-option-row ${adminSelectedProject.toLowerCase() === name.toLowerCase() ? "selected" : ""}`}
+                          >
+                            <button
+                              type="button"
+                              className="project-option-name"
+                              onClick={() => {
+                                setAdminSelectedProject(name);
+                                setProject(name);
+                                setIsAdminProjectDropdownOpen(false);
+                                setAdminProjectSearch("");
+                              }}
+                              role="option"
+                              aria-selected={adminSelectedProject.toLowerCase() === name.toLowerCase()}
+                            >
+                              {name}
+                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                className="project-option-delete-btn"
+                                onClick={(e) => handleDeleteProject(e, name)}
+                                title={`Delete ${name}`}
+                                aria-label={`Delete ${name}`}
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  width="12"
+                                  height="12"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.4"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <line x1="18" y1="6" x2="6" y2="18" />
+                                  <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </form>
           )}
 
           <form onSubmit={addTask} className="task-form">
-            {/* Field 1: Date */}
+            {/* Field 1: Employee ID */}
+            <div className="form-group">
+              <label htmlFor="empId" className="form-label">
+                <svg className="field-icon emp-id-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <span>Employee ID</span>
+              </label>
+              <input
+                id="empId"
+                type="text"
+                value={empId}
+                onChange={(e) => setEmpId(e.target.value)}
+                placeholder="Enter employee ID"
+                className="form-input"
+                required
+              />
+            </div>
+
+            {/* Field 2: Employee Name */}
+            <div className="form-group">
+              <label htmlFor="empName" className="form-label">
+                <svg className="field-icon emp-name-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <span>Employee Name</span>
+              </label>
+              <input
+                id="empName"
+                type="text"
+                value={empName}
+                onChange={(e) => setEmpName(e.target.value)}
+                placeholder="Enter employee name"
+                className="form-input"
+                required
+              />
+            </div>
+
+            {/* Field 3: Project Name (Custom Searchable Dropdown) */}
+            <div className="form-group project-dropdown-group" ref={projectDropdownRef}>
+              <label htmlFor="project-trigger" className="form-label">
+                <svg
+                  className="field-icon project-icon"
+                  viewBox="0 0 24 24"
+                  width="16"
+                  height="16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                <span>
+                  Project Name <span className="required-asterisk">*</span>
+                </span>
+              </label>
+
+              <button
+                type="button"
+                id="project-trigger"
+                className={`project-dropdown-trigger ${isProjectDropdownOpen ? "active" : ""} ${!project ? "placeholder" : ""}`}
+                onClick={() => {
+                  setIsProjectDropdownOpen((prev) => !prev);
+                  setProjectSearch("");
+                }}
+                aria-haspopup="listbox"
+                aria-expanded={isProjectDropdownOpen}
+              >
+                <span className="project-trigger-text">
+                  {project || "Select a project"}
+                </span>
+                <svg
+                  className="project-dropdown-arrow"
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points={isProjectDropdownOpen ? "18 15 12 9 6 15" : "6 9 12 15 18 9"} />
+                </svg>
+              </button>
+
+              {isProjectDropdownOpen && (
+                <div className="project-dropdown-menu" role="listbox">
+                  <div className="project-search-wrapper">
+                    <svg
+                      className="project-search-icon"
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <input
+                      type="text"
+                      className="project-search-input"
+                      placeholder="Search project..."
+                      value={projectSearch}
+                      onChange={(e) => setProjectSearch(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+
+                  <div className="project-options-list">
+                    {filteredProjects.length === 0 ? (
+                      <div className="project-empty-item">No projects found</div>
+                    ) : (
+                      filteredProjects.map((name) => (
+                        <div
+                          key={name}
+                          className={`project-option-row ${project.toLowerCase() === name.toLowerCase() ? "selected" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            className="project-option-name"
+                            onClick={() => {
+                              setProject(name);
+                              setIsProjectDropdownOpen(false);
+                              setProjectSearch("");
+                            }}
+                            role="option"
+                            aria-selected={project.toLowerCase() === name.toLowerCase()}
+                          >
+                            {name}
+                          </button>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="project-option-delete-btn"
+                              onClick={(e) => handleDeleteProject(e, name)}
+                              title={`Delete ${name}`}
+                              aria-label={`Delete ${name}`}
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                width="12"
+                                height="12"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.4"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <line x1="18" y1="6" x2="6" y2="18" />
+                                <line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Field 4: Date */}
             <div className="form-group">
               <label htmlFor="taskDate" className="form-label">
                 <svg className="field-icon date-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -802,65 +1197,7 @@ function App() {
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="project" className="form-label">
-                <span>Project</span>
-              </label>
-              <select
-                id="project"
-                value={project}
-                onChange={(e) => setProject(e.target.value)}
-                className="form-input"
-                required
-              >
-                <option value="">Select a project</option>
-                {projectChoices.map((name) => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Field 2: Employee ID */}
-            <div className="form-group">
-              <label htmlFor="empId" className="form-label">
-                <svg className="field-icon emp-id-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-                <span>Employee ID</span>
-              </label>
-              <input
-                id="empId"
-                type="text"
-                value={empId}
-                onChange={(e) => setEmpId(e.target.value)}
-                placeholder="Enter employee ID"
-                className="form-input"
-                required
-              />
-            </div>
-
-            {/* Field 3: Employee Name */}
-            <div className="form-group">
-              <label htmlFor="empName" className="form-label">
-                <svg className="field-icon emp-name-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-                <span>Employee Name</span>
-              </label>
-              <input
-                id="empName"
-                type="text"
-                value={empName}
-                onChange={(e) => setEmpName(e.target.value)}
-                placeholder="Enter employee name"
-                className="form-input"
-                required
-              />
-            </div>
-
-            {/* Field 4: Task Done */}
+            {/* Field 5: Task Done */}
             <div className="form-group">
               <label htmlFor="task" className="form-label">
                 <svg className="field-icon task-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
