@@ -482,6 +482,8 @@ function App() {
       saveCachedNotifs(email, notifs);
       // Broadcast to other open tabs of the same browser.
       broadcast(notifs);
+    }, (err) => {
+      console.error("Notification listener failed", err);
     });
 
     return () => {
@@ -647,7 +649,6 @@ function App() {
   const tasksRef = useRef([]);
   const employeesRef = useRef([]);
   const projectsRef = useRef([]);
-  const importedRef = useRef(false);
   const loadingRef = useRef(false);
 
   useEffect(() => {
@@ -666,13 +667,9 @@ function App() {
       const next = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       tasksRef.current = next;
       setTasks(next);
-      if (isAdmin && !importedRef.current) {
-        importedRef.current = true;
-        loadFromSheets(next, true);
-      }
     });
     return unsubscribe;
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt"));
@@ -975,7 +972,13 @@ function App() {
       });
 
       // Notify the task owner
-      const ownerEmail = String(viewingTask.userEmail || "").trim().toLowerCase();
+      let ownerEmail = String(viewingTask.userEmail || "").trim().toLowerCase();
+      if (!ownerEmail) {
+        const emp = employees.find(
+          (item) => String(item["Employee ID"] || "").trim() === String(viewingTask["Employee ID"] || "").trim()
+        );
+        ownerEmail = String(emp?.["Email ID"] || "").trim().toLowerCase();
+      }
       if (ownerEmail && ownerEmail !== ADMIN_EMAIL) {
         await addDoc(collection(db, 'notifications'), {
           type: 'task_remark',
@@ -2930,6 +2933,7 @@ function App() {
                         const isProjectReq = n.type === 'project_request';
                         const isProjMsg = n.type === 'project_message';
                         const isTaskRemark = n.type === 'task_remark';
+                        const isProjectUpdate = n.type === 'project_update';
                         const avatarBg = isProjectReq ? '#2563eb' : isProjMsg ? '#0891b2' : isTaskRemark ? '#0f766e' : '#7c3aed';
                         const avatarInitial = isTaskRemark
                           ? (n.adminEmail || 'A').charAt(0).toUpperCase()
@@ -2962,6 +2966,18 @@ function App() {
                                   <button
                                     className="notif-view-btn"
                                     onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('projects'); }}
+                                  >View Project</button>
+                                </>
+                              ) : isProjectUpdate ? (
+                                <>
+                                  <p className="notif-item-text">
+                                    <strong>{n.actorName || "Admin"}</strong> {n.summary || "updated a project"}
+                                  </p>
+                                  <p className="notif-item-title">"{n.projectName}"</p>
+                                  <p className="notif-item-meta">{timeAgoNotif(n.createdAt)}</p>
+                                  <button
+                                    className="notif-view-btn"
+                                    onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav("projects"); }}
                                   >View Project</button>
                                 </>
                               ) : isTaskRemark ? (

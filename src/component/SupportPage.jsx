@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
-  doc, updateDoc, deleteDoc, runTransaction, where
+  doc, updateDoc, deleteDoc, runTransaction, where, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { notifyRecipients } from '../services/notifyService';
 import '../style/SupportPage.css';
 
 const TECH_OPTIONS = ['React','JavaScript','TypeScript','Java','Python','Node.js','CSS','SQL','Firebase','Other'];
@@ -105,38 +106,32 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
         createdAt: now,
       });
 
-      // Build a deduplicated recipient list: all registered users except the requester.
-      // Admin is always included once (unless the requester IS the admin).
       const ADMIN_EMAIL = 'admin@hepl.com';
-      const seen = new Set([myEmail]); // exclude requester
-      const recipients = [];
-
-      // Add all employees from the directory
-      for (const emp of employees) {
-        const email = String(emp['Email ID'] || '').trim().toLowerCase();
-        if (!email || seen.has(email)) continue;
-        seen.add(email);
-        recipients.push({ email, empId: emp['Employee ID'] || '' });
+      let directoryEmails = (employees || []).map((item) => item['Email ID']);
+      let taskEmails = [];
+      try {
+        const [empSnap, taskSnap] = await Promise.all([
+          getDocs(collection(db, 'employees')),
+          getDocs(collection(db, 'tasks')),
+        ]);
+        directoryEmails = empSnap.docs.map((item) => item.data()['Email ID']);
+        taskEmails = taskSnap.docs.map((item) => item.data().userEmail);
+      } catch {
+        directoryEmails = (employees || []).map((item) => item['Email ID']);
       }
-
-      // Always ensure admin receives a notification (unless they are the requester)
-      if (!seen.has(ADMIN_EMAIL)) {
-        recipients.push({ email: ADMIN_EMAIL, empId: '' });
-      }
-
-      await Promise.all(recipients.map(({ email, empId }) =>
-        addDoc(collection(db, 'notifications'), {
+      await notifyRecipients(
+        [ADMIN_EMAIL, ...directoryEmails, ...taskEmails],
+        {
           type: 'support_request',
           requestId: reqRef.id,
           requestTitle: form.title.trim(),
+          projectName: form.projectName.trim(),
           requesterName: getMyName(),
           requesterEmail: myEmail,
-          recipientEmail: email,
-          recipientEmpId: empId,
-          read: false,
           createdAt: now,
-        })
-      ));
+        },
+        myEmail
+      );
 
       setForm({ title: '', description: '', tech: '', projectName: '' });
       setFormError({});

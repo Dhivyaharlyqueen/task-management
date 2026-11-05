@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, where, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
+import { notifyRecipients } from '../services/notifyService';
 import '../style/ProjectsPage.css';
 
 const ADMIN_EMAIL = 'admin@hepl.com';
@@ -252,8 +253,33 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
     if (det) { await updateDoc(doc(db,'project_details',det.id), submitData); }
     else { await addDoc(collection(db,'project_details'),{name:submitModal.name,userEmail:myEmail,createdAt:Date.now(),deadline:submitModal.det?.deadline||'',...submitData}); }
     await logActivity(submitModal.name,'Submit',{note:submitNote.trim(),submittedAt:Date.now()});
+    await notifyRecipients([ADMIN_EMAIL], {
+      type: 'project_update',
+      summary: 'submitted a project for approval',
+      actorName: getSenderName(),
+      projectName: submitModal.name,
+      createdAt: Date.now(),
+    }, myEmail);
     setSubmitModal(null); setSubmitNote('');
     showSnack('Project submitted for approval','success');
+  }
+
+  function emailsForProject(name) {
+    const det = getDetail(name);
+    const projectTasks = tasks.filter(t => String(t.Project || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
+    const fromTasks = projectTasks.map(t => t.userEmail);
+    const fromIds = projectTasks.map(t => {
+      const emp = (employees || []).find(item => String(item['Employee ID'] || '').trim() === String(t['Employee ID'] || '').trim());
+      return emp ? emp['Email ID'] : '';
+    });
+    return [
+      ...(det?.assignedEmails || []),
+      det?.submittedByEmail,
+      det?.userEmail,
+      ...fromTasks,
+      ...fromIds,
+      ...(employees || []).map(item => item['Email ID']),
+    ];
   }
 
   async function handleApproveProject(p) {
@@ -261,6 +287,13 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
     if (!det) return;
     await updateDoc(doc(db,'project_details',det.id),{status:'Completed',approvedAt:Date.now(),approvedBy:currentUser?.email||'',adminRemark:adminRemark.trim()});
     await logActivity(p.name,'Approve',{approvedAt:Date.now(),remark:adminRemark.trim()});
+    await notifyRecipients(emailsForProject(p.name), {
+      type: 'project_update',
+      summary: 'approved your project',
+      actorName: 'Admin',
+      projectName: p.name,
+      createdAt: Date.now(),
+    }, currentUser?.email);
     setReviewModal(null); setAdminRemark('');
     showSnack('Project approved','success');
   }
@@ -271,6 +304,13 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
     if (!det) return;
     await updateDoc(doc(db,'project_details',det.id),{status:'Revision Required',rejectedAt:Date.now(),rejectedBy:currentUser?.email||'',rejectReason:rejectReason.trim(),adminRemark:adminRemark.trim()});
     await logActivity(p.name,'Reject',{rejectedAt:Date.now(),reason:rejectReason.trim(),remark:adminRemark.trim()});
+    await notifyRecipients(emailsForProject(p.name), {
+      type: 'project_update',
+      summary: 'sent your project back for revision',
+      actorName: 'Admin',
+      projectName: p.name,
+      createdAt: Date.now(),
+    }, currentUser?.email);
     setReviewModal(null); setRejectReason(''); setAdminRemark('');
     showSnack('Project sent for revision','success');
   }
@@ -286,14 +326,12 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
     const requesterName = getSenderName();
     const now = Date.now();
     const empSnap = await getDocs(collection(db,'employees'));
-    const recipientEmails = new Set();
-    recipientEmails.add('admin@hepl.com');
-    empSnap.docs.forEach(d => {
-      const email = String(d.data()['Email ID']||'').toLowerCase();
-      if (email && email !== requesterEmail) recipientEmails.add(email);
-    });
-    const notifBase = { type:'project_request', requesterName, requesterEmail, projectName:form.name.trim(), createdAt:now, read:false };
-    await Promise.all(Array.from(recipientEmails).map(r => addDoc(collection(db,'notifications'),{...notifBase,recipientEmail:r})));
+    const directoryEmails = empSnap.docs.map(d => d.data()['Email ID']);
+    await notifyRecipients(
+      [ADMIN_EMAIL, ...directoryEmails, ...(form.assignedEmails || [])],
+      { type:'project_request', requesterName, requesterEmail, projectName:form.name.trim(), createdAt:now },
+      requesterEmail
+    );
     setAddModal(false); setForm({name:'',description:'',startDate:todayInput(),deadline:'',assignedEmails:[]});
     showSnack('Project created','success');
   }
@@ -310,19 +348,11 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   async function fanOutProjectMsgNotif(projectName, messagePreview) {
     const senderEmail = String(currentUser?.email||'').toLowerCase();
     const senderName = getSenderName();
-    const now = Date.now();
-    // Notify all employees assigned to this project except the sender
-    const projectTasks = tasks.filter(t => String(t.Project||'').trim().toLowerCase() === projectName.trim().toLowerCase());
-    const recipientEmails = new Set();
-    recipientEmails.add('admin@hepl.com');
-    projectTasks.forEach(t => {
-      const email = String(t.userEmail||'').toLowerCase();
-      if (email && email !== senderEmail) recipientEmails.add(email);
-    });
-    recipientEmails.delete(senderEmail);
-    if (!recipientEmails.size) return;
-    const notifBase = { type:'project_message', senderName, senderEmail, projectName, messagePreview: messagePreview.slice(0,80), createdAt:now, read:false };
-    await Promise.all(Array.from(recipientEmails).map(r => addDoc(collection(db,'notifications'),{...notifBase,recipientEmail:r})));
+    await notifyRecipients(
+      emailsForProject(projectName),
+      { type:'project_message', senderName, senderEmail, projectName, messagePreview: messagePreview.slice(0,80), createdAt: Date.now() },
+      senderEmail
+    );
   }
 
   async function handleSendMessage() {
