@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
-  doc, updateDoc, deleteDoc, runTransaction, where, getDocs
+  doc, updateDoc, deleteDoc, runTransaction
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { notifyRecipients } from '../services/notifyService';
 import '../style/SupportPage.css';
 
 const TECH_OPTIONS = ['React','JavaScript','TypeScript','Java','Python','Node.js','CSS','SQL','Firebase','Other'];
@@ -105,33 +104,6 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
         progressNote: '',
         createdAt: now,
       });
-
-      const ADMIN_EMAIL = 'admin@hepl.com';
-      let directoryEmails = (employees || []).map((item) => item['Email ID']);
-      let taskEmails = [];
-      try {
-        const [empSnap, taskSnap] = await Promise.all([
-          getDocs(collection(db, 'employees')),
-          getDocs(collection(db, 'tasks')),
-        ]);
-        directoryEmails = empSnap.docs.map((item) => item.data()['Email ID']);
-        taskEmails = taskSnap.docs.map((item) => item.data().userEmail);
-      } catch {
-        directoryEmails = (employees || []).map((item) => item['Email ID']);
-      }
-      await notifyRecipients(
-        [ADMIN_EMAIL, ...directoryEmails, ...taskEmails],
-        {
-          type: 'support_request',
-          requestId: reqRef.id,
-          requestTitle: form.title.trim(),
-          projectName: form.projectName.trim(),
-          requesterName: getMyName(),
-          requesterEmail: myEmail,
-          createdAt: now,
-        },
-        myEmail
-      );
 
       setForm({ title: '', description: '', tech: '', projectName: '' });
       setFormError({});

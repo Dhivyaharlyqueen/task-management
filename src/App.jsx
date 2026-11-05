@@ -452,6 +452,7 @@ function App() {
   const [notifications, setNotifications] = useState(() =>
     loadCachedNotifs(currentUser?.email)
   );
+  const [supportNotifs, setSupportNotifs] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifRef = useRef(null);
   const notifChannelRef = useRef(null);
@@ -492,6 +493,60 @@ function App() {
     };
   }, [currentUser?.email]);
 
+  // Every signed-in user sees a new support request. Read state stays on this browser
+  // so one person marking it read does not clear it for everyone else.
+  useEffect(() => {
+    if (!currentUser?.email) return;
+    const email = currentUser.email.toLowerCase();
+    const readKey = `support_read_${email}`;
+    const loadRead = () => {
+      try {
+        return new Set(JSON.parse(localStorage.getItem(readKey) || "[]"));
+      } catch {
+        return new Set();
+      }
+    };
+    const q = query(collection(db, "support_requests"), orderBy("createdAt", "desc"));
+    return onSnapshot(q, (snap) => {
+      const read = loadRead();
+      setSupportNotifs(
+        snap.docs
+          .map((item) => ({ id: item.id, ...item.data() }))
+          .filter((item) => String(item.requesterEmail || "").toLowerCase() !== email)
+          .map((item) => ({
+            id: `support:${item.id}`,
+            requestId: item.id,
+            type: "support_request",
+            requestTitle: item.title || "",
+            projectName: item.projectName || "",
+            requesterName: item.requesterName || "A user",
+            requesterEmail: item.requesterEmail || "",
+            createdAt: item.createdAt || 0,
+            read: read.has(item.id),
+          }))
+      );
+    }, (err) => {
+      console.error("Support notification listener failed", err);
+    });
+  }, [currentUser?.email]);
+
+  const bellNotifs = [...notifications.filter((item) => item.type !== "support_request"), ...supportNotifs]
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  function markSupportRead(ids) {
+    const email = String(currentUser?.email || "").toLowerCase();
+    const readKey = `support_read_${email}`;
+    const read = new Set();
+    try {
+      JSON.parse(localStorage.getItem(readKey) || "[]").forEach((id) => read.add(id));
+    } catch {
+      // ignore bad cache
+    }
+    ids.forEach((id) => read.add(id));
+    localStorage.setItem(readKey, JSON.stringify([...read]));
+    setSupportNotifs((prev) => prev.map((item) => (ids.includes(item.requestId) ? { ...item, read: true } : item)));
+  }
+
   // Close notif dropdown on outside click
   useEffect(() => {
     if (!notifOpen) return;
@@ -503,19 +558,23 @@ function App() {
   }, [notifOpen]);
 
   async function markAllNotifsRead() {
-    const unread = notifications.filter(n => !n.read);
-    if (!unread.length) return;
-    const batch = writeBatch(db);
-    unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
-    await batch.commit();
-    // Optimistically update localStorage + broadcast so other tabs reflect
-    // the change before the Firestore snapshot arrives.
-    const updated = notifications.map(n => ({ ...n, read: true }));
-    saveCachedNotifs(currentUser?.email, updated);
-    notifChannelRef.current?.broadcast(updated);
+    const unread = notifications.filter(n => !n.read && n.type !== "support_request");
+    if (unread.length) {
+      const batch = writeBatch(db);
+      unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
+      await batch.commit();
+      const updated = notifications.map(n => ({ ...n, read: true }));
+      saveCachedNotifs(currentUser?.email, updated);
+      notifChannelRef.current?.broadcast(updated);
+    }
+    markSupportRead(supportNotifs.filter((item) => !item.read).map((item) => item.requestId));
   }
 
   async function markNotifRead(id) {
+    if (String(id).startsWith("support:")) {
+      markSupportRead([id.slice("support:".length)]);
+      return;
+    }
     await updateDoc(doc(db, 'notifications', id), { read: true });
     const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
     saveCachedNotifs(currentUser?.email, updated);
@@ -2910,9 +2969,9 @@ function App() {
                   <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
                   <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                 </svg>
-                {notifications.filter(n => !n.read).length > 0 && (
+                {bellNotifs.filter(n => !n.read).length > 0 && (
                   <span className="notif-badge">
-                    {notifications.filter(n => !n.read).length > 9 ? '9+' : notifications.filter(n => !n.read).length}
+                    {bellNotifs.filter(n => !n.read).length > 9 ? '9+' : bellNotifs.filter(n => !n.read).length}
                   </span>
                 )}
               </button>
@@ -2921,15 +2980,15 @@ function App() {
                 <div className="notif-dropdown">
                   <div className="notif-dropdown-header">
                     <span className="notif-dropdown-title">Notifications</span>
-                    {notifications.some(n => !n.read) && (
+                    {bellNotifs.some(n => !n.read) && (
                       <button className="notif-mark-all" onClick={markAllNotifsRead}>Mark all as read</button>
                     )}
                   </div>
                   <div className="notif-list">
-                    {notifications.length === 0 ? (
+                    {bellNotifs.length === 0 ? (
                       <div className="notif-empty">No notifications yet</div>
                     ) : (
-                      notifications.map(n => {
+                      bellNotifs.map(n => {
                         const isProjectReq = n.type === 'project_request';
                         const isProjMsg = n.type === 'project_message';
                         const isTaskRemark = n.type === 'task_remark';
