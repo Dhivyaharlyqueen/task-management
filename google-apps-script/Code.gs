@@ -34,7 +34,8 @@ function doPost(e) {
     "Date",
     "Employee ID",
     "Employee Name",
-    "Task Done"
+    "Task Done",
+    "Remarks"
   ];
 
   if (sheet.getLastRow() === 0) {
@@ -50,6 +51,9 @@ function doPost(e) {
     if (currentHeaders.indexOf("Task ID") === -1) {
       sheet.insertColumnBefore(1);
       sheet.getRange(1, 1).setValue("Task ID");
+    }
+    if (currentHeaders.indexOf("Remarks") === -1) {
+      sheet.getRange(1, sheet.getLastColumn() + 1).setValue("Remarks");
     }
   }
 
@@ -87,7 +91,8 @@ function doPost(e) {
       item["Date"] || "",
       item["Employee ID"] || "",
       item["Employee Name"] || "",
-      item["Task Done"] || ""
+      item["Task Done"] || "",
+      item["Remarks"] || ""
     ];
 
     var targetRow = id ? rowById[id] : null;
@@ -114,7 +119,7 @@ function doPost(e) {
     }
 
     if (targetRow) {
-      sheet.getRange(targetRow, 1, 1, 5).setValues([data]);
+      sheet.getRange(targetRow, 1, 1, data.length).setValues([data]);
       rowById[id] = targetRow;
     } else {
       sheet.appendRow(data);
