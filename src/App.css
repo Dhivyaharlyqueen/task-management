@@ -36,7 +36,8 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 20px rgba(15, 23, 42, 0.15);
   position: relative;
-  z-index: 30;
+  z-index: 40;
+  overflow: visible;
 }
 
 .header-inner {
@@ -3319,15 +3320,15 @@ select.form-input {
 }
 
 .notif-dropdown {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
+  position: fixed;
   width: 340px;
+  max-width: calc(100vw - 16px);
   background: #ffffff;
+  color: #0f172a;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
-  z-index: 500;
+  z-index: 4000;
   overflow: hidden;
   animation: notifDropIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }

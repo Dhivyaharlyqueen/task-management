@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
-  doc, updateDoc, deleteDoc, runTransaction
+  doc, updateDoc, deleteDoc, runTransaction, getDocs
 } from 'firebase/firestore';
 import { db } from '../firebase';
+import { notifyRecipients, ADMIN_EMAIL } from '../services/notifyService';
 import '../style/SupportPage.css';
 
 const TECH_OPTIONS = ['React','JavaScript','TypeScript','Java','Python','Node.js','CSS','SQL','Firebase','Other'];
@@ -104,6 +105,27 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
         progressNote: '',
         createdAt: now,
       });
+
+      try {
+        const emails = [ADMIN_EMAIL, ...(employees || []).map((item) => item['Email ID'])];
+        const [empSnap, taskSnap] = await Promise.all([
+          getDocs(collection(db, 'employees')).catch(() => null),
+          getDocs(collection(db, 'tasks')).catch(() => null),
+        ]);
+        empSnap?.forEach((item) => emails.push(item.data()['Email ID']));
+        taskSnap?.forEach((item) => emails.push(item.data().userEmail));
+        await notifyRecipients(emails, {
+          type: 'support_request',
+          requestId: reqRef.id,
+          requestTitle: form.title.trim(),
+          projectName: form.projectName.trim(),
+          requesterName: getMyName(),
+          requesterEmail: myEmail,
+          createdAt: now,
+        }, myEmail);
+      } catch (err) {
+        console.error('Support notification fan-out failed', err);
+      }
 
       setForm({ title: '', description: '', tech: '', projectName: '' });
       setFormError({});

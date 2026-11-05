@@ -5,6 +5,7 @@ import ReportsPage from "./component/ReportsPage";
 import MyReportsPage from "./component/MyReportsPage";
 import SupportPage from "./component/SupportPage";
 import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, where, getDocs, writeBatch } from "firebase/firestore";
+import { createPortal } from "react-dom";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import Snackbar, { useSnackbar } from "./component/Snackbar";
@@ -19,9 +20,18 @@ function isAdminEmail(email) {
   return String(email || "").trim().toLowerCase() === ADMIN_EMAIL;
 }
 
+function notifTime(ts) {
+  if (ts == null || ts === "") return 0;
+  if (typeof ts === "number") return ts;
+  if (typeof ts === "object" && typeof ts.seconds === "number") return ts.seconds * 1000;
+  const parsed = new Date(ts).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
 function timeAgoNotif(ts) {
-  if (!ts) return '';
-  const diff = Date.now() - ts;
+  const at = notifTime(ts);
+  if (!at) return "";
+  const diff = Date.now() - at;
   const m = Math.floor(diff / 60000);
   if (m < 1) return 'just now';
   if (m < 60) return `${m}m ago`;
@@ -454,7 +464,10 @@ function App() {
   );
   const [supportNotifs, setSupportNotifs] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifBox, setNotifBox] = useState({ top: 76, right: 16 });
   const notifRef = useRef(null);
+  const notifBtnRef = useRef(null);
+  const notifDropdownRef = useRef(null);
   const notifChannelRef = useRef(null);
 
   // Real-time notifications listener scoped to current user
@@ -476,7 +489,7 @@ function App() {
     const unsub = onSnapshot(q, snap => {
       const notifs = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        .sort((a, b) => notifTime(b.createdAt) - notifTime(a.createdAt));
       setNotifications(notifs);
       // Persist to localStorage so the next page load shows cached data
       // immediately while Firestore loads.
@@ -506,32 +519,37 @@ function App() {
         return new Set();
       }
     };
-    const q = query(collection(db, "support_requests"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snap) => {
+    return onSnapshot(collection(db, "support_requests"), (snap) => {
       const read = loadRead();
       setSupportNotifs(
         snap.docs
           .map((item) => ({ id: item.id, ...item.data() }))
-          .filter((item) => String(item.requesterEmail || "").toLowerCase() !== email)
-          .map((item) => ({
-            id: `support:${item.id}`,
-            requestId: item.id,
-            type: "support_request",
-            requestTitle: item.title || "",
-            projectName: item.projectName || "",
-            requesterName: item.requesterName || "A user",
-            requesterEmail: item.requesterEmail || "",
-            createdAt: item.createdAt || 0,
-            read: read.has(item.id),
-          }))
+          .map((item) => {
+            const mine = String(item.requesterEmail || "").toLowerCase() === email;
+            return {
+              id: `support:${item.id}`,
+              requestId: item.id,
+              type: "support_request",
+              requestTitle: item.title || "",
+              projectName: item.projectName || "",
+              requesterName: mine ? "You" : (item.requesterName || "A user"),
+              requesterEmail: item.requesterEmail || "",
+              createdAt: item.createdAt || 0,
+              read: read.has(item.id),
+            };
+          })
+          .sort((a, b) => notifTime(b.createdAt) - notifTime(a.createdAt))
       );
     }, (err) => {
       console.error("Support notification listener failed", err);
     });
   }, [currentUser?.email]);
 
-  const bellNotifs = [...notifications.filter((item) => item.type !== "support_request"), ...supportNotifs]
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const supportIds = new Set(supportNotifs.map((item) => item.requestId).filter(Boolean));
+  const bellNotifs = [
+    ...notifications.filter((item) => !(item.type === "support_request" && item.requestId && supportIds.has(item.requestId))),
+    ...supportNotifs,
+  ].sort((a, b) => notifTime(b.createdAt) - notifTime(a.createdAt));
 
   function markSupportRead(ids) {
     const email = String(currentUser?.email || "").toLowerCase();
@@ -551,14 +569,16 @@ function App() {
   useEffect(() => {
     if (!notifOpen) return;
     function handleOutside(e) {
-      if (notifRef.current && !notifRef.current.contains(e.target)) setNotifOpen(false);
+      if (notifRef.current && notifRef.current.contains(e.target)) return;
+      if (notifDropdownRef.current && notifDropdownRef.current.contains(e.target)) return;
+      setNotifOpen(false);
     }
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
   }, [notifOpen]);
 
   async function markAllNotifsRead() {
-    const unread = notifications.filter(n => !n.read && n.type !== "support_request");
+    const unread = notifications.filter((n) => !n.read);
     if (unread.length) {
       const batch = writeBatch(db);
       unread.forEach(n => batch.update(doc(db, 'notifications', n.id), { read: true }));
@@ -2960,8 +2980,18 @@ function App() {
             <div className="notif-bell-wrap" ref={notifRef}>
               <button
                 type="button"
+                ref={notifBtnRef}
                 className="notif-bell-btn"
-                onClick={() => setNotifOpen(o => !o)}
+                onClick={() => {
+                  const rect = notifBtnRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    setNotifBox({
+                      top: rect.bottom + 8,
+                      right: Math.max(8, window.innerWidth - rect.right),
+                    });
+                  }
+                  setNotifOpen((open) => !open);
+                }}
                 aria-label="Notifications"
                 title="Notifications"
               >
@@ -2976,8 +3006,12 @@ function App() {
                 )}
               </button>
 
-              {notifOpen && (
-                <div className="notif-dropdown">
+              {notifOpen && createPortal(
+                <div
+                  className="notif-dropdown"
+                  ref={notifDropdownRef}
+                  style={{ top: notifBox.top, right: notifBox.right }}
+                >
                   <div className="notif-dropdown-header">
                     <span className="notif-dropdown-title">Notifications</span>
                     {bellNotifs.some(n => !n.read) && (
@@ -3071,7 +3105,8 @@ function App() {
                       })
                     )}
                   </div>
-                </div>
+                </div>,
+                document.body
               )}
             </div>
 

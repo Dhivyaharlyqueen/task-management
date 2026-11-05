@@ -1,6 +1,8 @@
 import { addDoc, collection } from "firebase/firestore";
 import { db } from "../firebase";
 
+export const ADMIN_EMAIL = "admin@hepl.com";
+
 export function normalizeEmail(value) {
   return String(value || "").trim().toLowerCase();
 }
