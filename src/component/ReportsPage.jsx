@@ -158,18 +158,6 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
   const [filterStatus, setFilterStatus] = useState('');
   const [filterTaskStatus, setFilterTaskStatus] = useState('');
 
-  if (!isAdmin) {
-    return (
-      <div className="rp-wrapper">
-        <div className="rp-access-denied">
-          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          <h3>Access Restricted</h3>
-          <p>Only Admin users can access the Reports module.</p>
-        </div>
-      </div>
-    );
-  }
-
   function getDetail(name) {
     return projectDetails.find(d=>String(d.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase())||null;
   }
@@ -405,8 +393,10 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
     }
   }
 
+  const activeRows = getActiveRows();
+
   function handleExport(type) {
-    const rows = getActiveRows();
+    const rows = activeRows;
     if (!rows.length) { showSnack('No data to export','info'); return; }
     const label = REPORT_TYPES.find(r=>r.key===activeReport)?.label||activeReport;
     const filename = label.replace(/\s+/g,'_')+'_Report';
@@ -421,6 +411,18 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
   }
 
   const hasFilters = fromDate||toDate||filterEmpName||filterEmpId||filterProject||filterStatus||filterTaskStatus;
+
+  if (!isAdmin) {
+    return (
+      <div className="rp-wrapper">
+        <div className="rp-access-denied">
+          <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ef4444" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+          <h3>Access Restricted</h3>
+          <p>Only Admin users can access the Reports module.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rp-wrapper rp-print-area">
@@ -570,7 +572,7 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
       <div className="rp-table-card">
         <div className="rp-table-header">
           <h3 className="rp-table-title">{REPORT_TYPES.find(r=>r.key===activeReport)?.label} Report</h3>
-          <span className="rp-row-count">{getActiveRows().length} records</span>
+          <span className="rp-row-count">{activeRows.length} records</span>
         </div>
         <div className="rp-table-wrap">
 

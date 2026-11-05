@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import ProjectsPage from "./component/ProjectsPage";
 import DailyActivitiesPage from "./component/DailyActivitiesPage";
 import ReportsPage from "./component/ReportsPage";
@@ -442,6 +442,7 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [viewingTask, setViewingTask] = useState(null);
   const [remarksText, setRemarksText] = useState("");
+  const [remarksPreset, setRemarksPreset] = useState("");
   const [savingRemarks, setSavingRemarks] = useState(false);
   const [loadingSheets, setLoadingSheets] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -469,11 +470,12 @@ function App() {
 
     const q = query(
       collection(db, 'notifications'),
-      where('recipientEmail', '==', email),
-      orderBy('createdAt', 'desc')
+      where('recipientEmail', '==', email)
     );
     const unsub = onSnapshot(q, snap => {
-      const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const notifs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       setNotifications(notifs);
       // Persist to localStorage so the next page load shows cached data
       // immediately while Firestore loads.
@@ -729,7 +731,9 @@ function App() {
 
   function openViewModal(item) {
     setViewingTask(item);
-    setRemarksText(item.remarks || item.Remarks || "");
+    const existing = item.remarks || item.Remarks || "";
+    setRemarksText(existing);
+    setRemarksPreset(existing);
   }
 
   useEffect(() => {
@@ -939,12 +943,25 @@ function App() {
     showSnack("Project deleted", "success");
   }
 
+  const REMARKS_PRESETS = [
+    "Work completed successfully.",
+    "Please provide more details.",
+    "Please correct the submitted work.",
+    "Task requires further updates.",
+    "Approved successfully.",
+    "Please update the report.",
+  ];
+
   async function handleSaveRemarks() {
     if (!isAdmin) {
       showSnack("Only Admin can save remarks", "error");
       return;
     }
     if (!viewingTask) return;
+    if (!remarksText.trim()) {
+      showSnack("Please select or enter a remark", "error");
+      return;
+    }
 
     setSavingRemarks(true);
     try {
@@ -957,8 +974,22 @@ function App() {
         adminEmail: currentUser?.email || ADMIN_EMAIL,
       });
 
-      setViewingTask((prev) => (prev ? { ...prev, remarks: remarksText } : null));
+      // Notify the task owner
+      const ownerEmail = String(viewingTask.userEmail || "").trim().toLowerCase();
+      if (ownerEmail && ownerEmail !== ADMIN_EMAIL) {
+        await addDoc(collection(db, 'notifications'), {
+          type: 'task_remark',
+          taskId: viewingTask.id,
+          taskName: viewingTask["Task Done"] || "",
+          remark: remarksText,
+          adminEmail: currentUser?.email || ADMIN_EMAIL,
+          recipientEmail: ownerEmail,
+          read: false,
+          createdAt: Date.now(),
+        });
+      }
 
+      setViewingTask((prev) => (prev ? { ...prev, remarks: remarksText } : null));
       setTasks((prev) =>
         prev.map((t) => (t.id === viewingTask.id ? { ...t, remarks: remarksText } : t))
       );
@@ -1828,7 +1859,7 @@ function App() {
       <div className="dash-projects-table-card">
         <div className="dash-table-card-header">
           <div className="dash-table-title-wrap">
-            <span className="dash-briefcase-icon" aria-hidden="true">ðŸ’¼</span>
+            <span className="dash-briefcase-icon" aria-hidden="true"></span>
             <h3 className="dash-table-card-title">Projects Overview</h3>
           </div>
           <button
@@ -1880,7 +1911,7 @@ function App() {
                             </span>
                           </div>
                         ) : (
-                          <span className="dash-no-emp-text">â€”</span>
+                          <span className="dash-no-emp-text"></span>
                         )}
                       </td>
                       <td className="td-proj-days">{p.totalWorkingDays} Days</td>
@@ -2269,7 +2300,7 @@ function App() {
 
   const renderMainCards = () => (
     <main className="container">
-      {/* Right Panel â€” Employee Task List */}
+      {/* Right Panel  Employee Task List */}
       <section className="table-card">
         <div className="table-header">
           <div className="table-header-top-row">
@@ -2423,7 +2454,7 @@ function App() {
                     aria-label="Remove project filter"
                     title="Remove project filter"
                   >
-                    âœ•
+                    ✕
                   </button>
                 </div>
               )}
@@ -2437,7 +2468,7 @@ function App() {
                     aria-label="Remove task type filter"
                     title="Remove task type filter"
                   >
-                    âœ•
+                    ✕
                   </button>
                 </div>
               )}
@@ -2452,7 +2483,7 @@ function App() {
                       aria-label={`Remove ${st} filter`}
                       title={`Remove ${st} filter`}
                     >
-                      âœ•
+                      ✕
                     </button>
                   </div>
                 ))
@@ -2466,14 +2497,14 @@ function App() {
                     aria-label="Remove status filter"
                     title="Remove status filter"
                   >
-                    âœ•
+                    ✕
                   </button>
                 </div>
               ) : null}
               {(appliedFilters.fromDate || appliedFilters.toDate) && (
                 <div className="admin-chip">
                   <span>
-                    Date: <strong>{appliedFilters.fromDate ? formatDate(appliedFilters.fromDate) : "Any"} â€“ {appliedFilters.toDate ? formatDate(appliedFilters.toDate) : "Any"}</strong>
+                    Date: <strong>{appliedFilters.fromDate ? formatDate(appliedFilters.fromDate) : "Any"}  {appliedFilters.toDate ? formatDate(appliedFilters.toDate) : "Any"}</strong>
                   </span>
                   <button
                     type="button"
@@ -2482,7 +2513,7 @@ function App() {
                     aria-label="Remove date range filter"
                     title="Remove date range filter"
                   >
-                    âœ•
+                    ✕
                   </button>
                 </div>
               )}
@@ -2548,7 +2579,7 @@ function App() {
                         <tr key={item.id} className="task-row">
                           <td className="sno-cell">{startIndex + index + 1}</td>
                           <td className="task-done-cell font-medium">{item["Task Done"]}</td>
-                          <td className="project-cell">{item.Project || "â€”"}</td>
+                          <td className="project-cell">{item.Project || ""}</td>
                           <td>
                             <div className="date-cell">
                               <span>{formatDate(item["Date"])}</span>
@@ -2607,6 +2638,37 @@ function App() {
                                   Submit
                                 </button>
                               )}
+                              {confirmId === item.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="action-btn confirm-delete-btn"
+                                    onClick={() => removeTask(item.id)}
+                                  >
+                                    Confirm
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="action-btn cancel-btn"
+                                    onClick={() => setConfirmId(null)}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="action-btn delete-btn"
+                                  onClick={() => setConfirmId(item.id)}
+                                  title="Delete Task"
+                                  aria-label="Delete Task"
+                                >
+                                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  </svg>
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -2631,7 +2693,7 @@ function App() {
                           </div>
                         </td>
                         <td className="emp-name-cell">{item["Employee Name"]}</td>
-                        <td className="project-cell">{item.Project || "â€”"}</td>
+                        <td className="project-cell">{item.Project || ""}</td>
                         <td className="task-done-cell">{item["Task Done"]}</td>
                         <td>
                           <div className="date-cell">
@@ -2644,7 +2706,7 @@ function App() {
                             <span>{formatDate(item["Date"])}</span>
                           </div>
                         </td>
-                        {isAdmin && <td className="user-cell">{item.userEmail || "â€”"}</td>}
+                        {isAdmin && <td className="user-cell">{item.userEmail || ""}</td>}
                         <td>
                           <div className="row-actions">
                             <button
@@ -2716,7 +2778,7 @@ function App() {
           {/* Pagination controls at bottom-right */}
           <div className="table-pagination">
             <span className="pagination-info">
-              Showing {totalRecords === 0 ? "0" : `${startIndex + 1}â€“${endIndex}`} of {totalRecords}
+              Showing {totalRecords === 0 ? "0" : `${startIndex + 1}${endIndex}`} of {totalRecords}
             </span>
             <div className="pagination-buttons">
               <button
@@ -2789,7 +2851,7 @@ function App() {
               <h1 className="brand-title">
                 Employee <span className="brand-title-accent">Task Tracker</span>
               </h1>
-              <p className="brand-subtitle">Track â€¢ Manage â€¢ Grow Together</p>
+              <p className="brand-subtitle">Track • Manage • Grow Together</p>
             </div>
           </div>
 
@@ -2837,7 +2899,7 @@ function App() {
               <button
                 type="button"
                 className="notif-bell-btn"
-                onClick={() => { setNotifOpen(o => !o); if (!notifOpen) markAllNotifsRead(); }}
+                onClick={() => setNotifOpen(o => !o)}
                 aria-label="Notifications"
                 title="Notifications"
               >
@@ -2867,11 +2929,15 @@ function App() {
                       notifications.map(n => {
                         const isProjectReq = n.type === 'project_request';
                         const isProjMsg = n.type === 'project_message';
-                        const avatarBg = isProjectReq ? '#2563eb' : isProjMsg ? '#0891b2' : '#7c3aed';
+                        const isTaskRemark = n.type === 'task_remark';
+                        const avatarBg = isProjectReq ? '#2563eb' : isProjMsg ? '#0891b2' : isTaskRemark ? '#0f766e' : '#7c3aed';
+                        const avatarInitial = isTaskRemark
+                          ? (n.adminEmail || 'A').charAt(0).toUpperCase()
+                          : (n.requesterName || n.senderName || '?').charAt(0).toUpperCase();
                         return (
                           <div key={n.id} className={`notif-item${n.read ? '' : ' notif-unread'}`}>
                             <div className="notif-item-avatar" style={{ background: avatarBg }}>
-                              {(n.requesterName || n.senderName || '?').charAt(0).toUpperCase()}
+                              {avatarInitial}
                             </div>
                             <div className="notif-item-body">
                               {isProjectReq ? (
@@ -2880,7 +2946,7 @@ function App() {
                                     <strong>{n.requesterName}</strong> raised a project request
                                   </p>
                                   <p className="notif-item-title">"{n.projectName}"</p>
-                                  <p className="notif-item-meta">{n.requesterEmail} Â· {timeAgoNotif(n.createdAt)}</p>
+                                  <p className="notif-item-meta">{n.requesterEmail} · {timeAgoNotif(n.createdAt)}</p>
                                   <button
                                     className="notif-view-btn"
                                     onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('projects'); }}
@@ -2892,11 +2958,23 @@ function App() {
                                     <strong>{n.senderName}</strong> posted in <strong>{n.projectName}</strong>
                                   </p>
                                   <p className="notif-item-title">"{n.messagePreview}"</p>
-                                  <p className="notif-item-meta">{n.senderEmail} Â· {timeAgoNotif(n.createdAt)}</p>
+                                  <p className="notif-item-meta">{n.senderEmail} · {timeAgoNotif(n.createdAt)}</p>
                                   <button
                                     className="notif-view-btn"
                                     onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('projects'); }}
                                   >View Project</button>
+                                </>
+                              ) : isTaskRemark ? (
+                                <>
+                                  <p className="notif-item-text">
+                                    <strong>Admin</strong> added a remark on your task
+                                  </p>
+                                  <p className="notif-item-title">"{n.remark}"</p>
+                                  <p className="notif-item-meta">{timeAgoNotif(n.createdAt)}</p>
+                                  <button
+                                    className="notif-view-btn"
+                                    onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('my-tasks'); }}
+                                  >View Task</button>
                                 </>
                               ) : (
                                 <>
@@ -2904,7 +2982,7 @@ function App() {
                                     <strong>{n.requesterName}</strong> posted a support request
                                   </p>
                                   <p className="notif-item-title">"{n.requestTitle}"</p>
-                                  <p className="notif-item-meta">{n.requesterEmail} Â· {timeAgoNotif(n.createdAt)}</p>
+                                  <p className="notif-item-meta">{n.requesterEmail} · {timeAgoNotif(n.createdAt)}</p>
                                   <button
                                     className="notif-view-btn"
                                     onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('support'); }}
@@ -3028,17 +3106,6 @@ function App() {
               <span className="sidebar-label">Support Hub</span>
             </button>
 
-            <button
-              type="button"
-              className={`sidebar-nav-item ${activeNav === "profile" ? "active" : ""}`}
-              onClick={() => setActiveNav("profile")}
-            >
-              <svg className="sidebar-icon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                <circle cx="12" cy="7" r="4" />
-              </svg>
-              <span className="sidebar-label">Profile</span>
-            </button>
           </div>
 
           <div className="sidebar-bottom">
@@ -3057,7 +3124,7 @@ function App() {
           </div>
         </aside>
 
-        <div className="portal-content">
+        <div className={`portal-content${activeNav === 'support' ? ' portal-dark' : ''}`}>
           {activeNav === "dashboard" ? (
             renderDashboard()
           ) : activeNav === "my-tasks" ? (
@@ -3179,18 +3246,18 @@ function App() {
                     <span className="emp-avatar small-avatar" style={{ backgroundColor: "#eff6ff", color: "#2563eb" }}>
                       {(viewingTask["Employee ID"] || "E").trim().charAt(0).toUpperCase()}
                     </span>
-                    <span className="modal-value-strong">{viewingTask["Employee ID"] || "â€”"}</span>
+                    <span className="modal-value-strong">{viewingTask["Employee ID"] || ""}</span>
                   </div>
                 </div>
 
                 <div className="modal-field">
                   <span className="modal-label">Employee Name</span>
-                  <span className="modal-value-text">{viewingTask["Employee Name"] || "â€”"}</span>
+                  <span className="modal-value-text">{viewingTask["Employee Name"] || ""}</span>
                 </div>
 
                 <div className="modal-field">
                   <span className="modal-label">Project</span>
-                  <span className="modal-project-badge">{viewingTask.Project || "â€”"}</span>
+                  <span className="modal-project-badge">{viewingTask.Project || ""}</span>
                 </div>
 
                 <div className="modal-field">
@@ -3202,7 +3269,7 @@ function App() {
                       <line x1="8" y1="2" x2="8" y2="6" />
                       <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
-                    <span>{formatDate(viewingTask["Date"]) || viewingTask["Date"] || "â€”"}</span>
+                    <span>{formatDate(viewingTask["Date"]) || viewingTask["Date"] || ""}</span>
                   </div>
                 </div>
 
@@ -3246,14 +3313,34 @@ function App() {
                       </div>
                     ) : (
                       <div className="modal-remarks-edit-wrap">
-                        <textarea
-                          id="adminRemarks"
-                          className="modal-remarks-textarea"
-                          rows={3}
-                          value={remarksText}
-                          onChange={(e) => setRemarksText(e.target.value)}
-                          placeholder="Add remarks for this task..."
-                        />
+                        <div className="remarks-select-wrap">
+                          <select
+                            className="remarks-preset-select"
+                            value={remarksPreset}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setRemarksPreset(val);
+                              if (val !== '__other__') setRemarksText(val);
+                              else setRemarksText('');
+                            }}
+                          >
+                            <option value="">— Select a remark —</option>
+                            {REMARKS_PRESETS.map(p => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                            <option value="__other__">Other (custom remark)…</option>
+                          </select>
+                        </div>
+                        {remarksPreset === '__other__' && (
+                          <textarea
+                            className="modal-remarks-textarea"
+                            rows={3}
+                            value={remarksText}
+                            onChange={e => setRemarksText(e.target.value)}
+                            placeholder="Type a custom remark..."
+                            autoFocus
+                          />
+                        )}
                         <div className="modal-remarks-actions">
                           <button
                             type="button"
@@ -3635,9 +3722,9 @@ function App() {
                       <div className="project-list">
                         {employees.map((item) => (
                           <span key={item.id} className="project-chip">
-                            {item["Employee Name"]} Â· {item["Email ID"]}
+                            {item["Employee Name"]} · {item["Email ID"]}
                             <button type="button" onClick={() => removeEmployee(item.id)} aria-label={`Remove ${item["Employee Name"]}`}>
-                              Ã—
+                              ×
                             </button>
                           </span>
                         ))}

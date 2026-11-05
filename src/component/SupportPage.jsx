@@ -88,6 +88,7 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
     if (Object.keys(errors).length) { setFormError(errors); return; }
     setSubmitting(true);
     try {
+      const now = Date.now();
       const reqRef = await addDoc(collection(db, 'support_requests'), {
         title: form.title.trim(),
         description: form.description.trim(),
@@ -101,16 +102,29 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
         claimedAt: null,
         completedAt: null,
         progressNote: '',
-        createdAt: Date.now(),
+        createdAt: now,
       });
+
+      // Build a deduplicated recipient list: all registered users except the requester.
+      // Admin is always included once (unless the requester IS the admin).
       const ADMIN_EMAIL = 'admin@hepl.com';
-      const recipientEmails = [
-        ...employees
-          .filter(e => String(e['Email ID'] || '').toLowerCase() !== myEmail)
-          .map(e => ({ email: String(e['Email ID'] || '').toLowerCase(), empId: e['Employee ID'] || '' })),
-        ...(myEmail !== ADMIN_EMAIL ? [{ email: ADMIN_EMAIL, empId: '' }] : []),
-      ];
-      await Promise.all(recipientEmails.map(({ email, empId }) =>
+      const seen = new Set([myEmail]); // exclude requester
+      const recipients = [];
+
+      // Add all employees from the directory
+      for (const emp of employees) {
+        const email = String(emp['Email ID'] || '').trim().toLowerCase();
+        if (!email || seen.has(email)) continue;
+        seen.add(email);
+        recipients.push({ email, empId: emp['Employee ID'] || '' });
+      }
+
+      // Always ensure admin receives a notification (unless they are the requester)
+      if (!seen.has(ADMIN_EMAIL)) {
+        recipients.push({ email: ADMIN_EMAIL, empId: '' });
+      }
+
+      await Promise.all(recipients.map(({ email, empId }) =>
         addDoc(collection(db, 'notifications'), {
           type: 'support_request',
           requestId: reqRef.id,
@@ -120,9 +134,10 @@ export default function SupportPage({ currentUser, employees, showSnack }) {
           recipientEmail: email,
           recipientEmpId: empId,
           read: false,
-          createdAt: Date.now(),
+          createdAt: now,
         })
       ));
+
       setForm({ title: '', description: '', tech: '', projectName: '' });
       setFormError({});
       setShowForm(false);

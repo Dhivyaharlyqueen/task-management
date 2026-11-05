@@ -2,8 +2,10 @@
 
 .sp-wrapper {
   padding: 20px 24px 40px;
-  background: #0f0a1e;
+  background: #13102a;
   min-height: 100%;
+  width: 100%;
+  flex: 1;
   box-sizing: border-box;
   color: #e2e8f0;
 }
@@ -103,7 +105,7 @@
 
 /* ── Post Form ── */
 .sp-form-card {
-  background: #1a1033;
+  background: #1c1a35;
   border: 1px solid rgba(124,58,237,0.3);
   border-radius: 16px;
   padding: 20px 22px;
@@ -146,7 +148,7 @@
   border-color: #7c3aed;
   background: rgba(124,58,237,0.08);
 }
-.sp-input option { background: #1a1033; color: #e2e8f0; }
+.sp-input option { background: #1c1a35; color: #e2e8f0; }
 .sp-textarea { resize: vertical; min-height: 90px; }
 .sp-input-err { border-color: #f87171 !important; }
 .sp-err-msg { font-size: 0.73rem; color: #f87171; margin-top: 2px; }
@@ -276,7 +278,7 @@
   cursor: pointer;
   transition: border-color 0.18s;
 }
-.sp-filter-select option { background: #1a1033; }
+.sp-filter-select option { background: #1c1a35; }
 .sp-filter-select:focus { border-color: #7c3aed; }
 
 /* ── Cards Grid ── */
@@ -288,7 +290,7 @@
 
 /* ── Request Card ── */
 .sp-card {
-  background: #1a1033;
+  background: #1c1a35;
   border: 1px solid rgba(124,58,237,0.18);
   border-radius: 16px;
   padding: 18px;
@@ -560,7 +562,7 @@
   backdrop-filter: blur(4px);
 }
 .sp-modal {
-  background: #1a1033;
+  background: #1c1a35;
   border: 1px solid rgba(124,58,237,0.3);
   border-radius: 16px;
   width: 100%;
