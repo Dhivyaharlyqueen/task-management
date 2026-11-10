@@ -1134,3 +1134,37 @@
 /* ── Pre-Closed badge ── */
 .pp-menu-item.pp-btn-finalize { color: #7c3aed; }
 .pp-menu-item.pp-btn-finalize:hover { background: #f3e8ff; }
+
+/* ── Delete button (trash icon, admin table) ── */
+.pp-delete-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fee2e2;
+  border: 1.5px solid #fca5a5;
+  border-radius: 7px;
+  color: #b91c1c;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  flex-shrink: 0;
+}
+.pp-delete-btn:hover { background: #fecaca; border-color: #f87171; transform: translateY(-1px); }
+
+/* ── Delete confirm button ── */
+.pp-btn-delete-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 18px;
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.18s;
+}
+.pp-btn-delete-confirm:hover { opacity: 0.88; }

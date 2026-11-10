@@ -583,6 +583,26 @@ function App() {
     markSupportRead(supportNotifs.filter((item) => !item.read).map((item) => item.requestId));
   }
 
+  async function clearAllNotifs() {
+    // Only allowed when every notification is already read
+    if (bellNotifs.some(n => !n.read)) return;
+    const email = String(currentUser?.email || '').toLowerCase();
+    // Delete all Firestore notification docs belonging to this user
+    if (notifications.length) {
+      const batch = writeBatch(db);
+      notifications.forEach(n => batch.delete(doc(db, 'notifications', n.id)));
+      await batch.commit();
+    }
+    // Clear support notif read-state from localStorage
+    localStorage.removeItem(`support_read_${email}`);
+    // Clear local cache and state
+    clearCachedNotifs(email);
+    setNotifications([]);
+    setSupportNotifs([]);
+    notifChannelRef.current?.broadcast([]);
+    setNotifOpen(false);
+  }
+
   async function markNotifRead(id) {
     if (String(id).startsWith("support:")) {
       markSupportRead([id.slice("support:".length)]);
@@ -946,62 +966,19 @@ function App() {
   async function handleDeleteProject(e, projectName) {
     e.stopPropagation();
     if (!isAdmin) return;
-
-    const nameLower = projectName.trim().toLowerCase();
-
+    // Only remove from the master projects list.
+    // Tasks, project_details, and related data are NOT deleted here —
+    // they remain intact so the project can be reused and existing
+    // task assignments are preserved.
     try {
-      // Delete from `projects` collection
       const projSnap = await getDocs(query(collection(db, "projects"), where("name", "==", projectName.trim())));
       for (const d of projSnap.docs) await deleteDoc(d.ref);
-
-      // Delete from `project_details` collection
-      const detSnap = await getDocs(collection(db, "project_details"));
-      for (const d of detSnap.docs) {
-        if (String(d.data().name || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
-      }
-
-      // Delete associated tasks
-      const taskSnap = await getDocs(query(collection(db, "tasks"), where("Project", "==", projectName.trim())));
-      for (const d of taskSnap.docs) await deleteDoc(d.ref);
-
-      // Delete project activity logs
-      const actSnap = await getDocs(collection(db, "project_activity"));
-      for (const d of actSnap.docs) {
-        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
-      }
-
-      // Delete project messages
-      const msgSnap = await getDocs(collection(db, "project_messages"));
-      for (const d of msgSnap.docs) {
-        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
-      }
-
-      // Delete deadline requests
-      const dreqSnap = await getDocs(collection(db, "deadline_requests"));
-      for (const d of dreqSnap.docs) {
-        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
-      }
-
-      // Delete related notifications
-      const notifSnap = await getDocs(collection(db, "notifications"));
-      for (const d of notifSnap.docs) {
-        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
-      }
     } catch (err) {
-      console.error("Error deleting project data from Firestore:", err);
+      console.error("Error removing project from list:", err);
     }
-
-    // Clear localStorage cache so deleted project never reappears on refresh
-    try {
-      localStorage.removeItem("saved_projects");
-    } catch {
-      // ignore
-    }
-
-    if (adminSelectedProject.trim().toLowerCase() === nameLower) setAdminSelectedProject("");
-    if (project.trim().toLowerCase() === nameLower) setProject("");
-
-    showSnack("Project deleted", "success");
+    if (adminSelectedProject.trim().toLowerCase() === projectName.trim().toLowerCase()) setAdminSelectedProject("");
+    if (project.trim().toLowerCase() === projectName.trim().toLowerCase()) setProject("");
+    showSnack("Project removed from list", "success");
   }
 
   const REMARKS_PRESETS = [
@@ -3079,9 +3056,21 @@ function App() {
                 >
                   <div className="notif-dropdown-header">
                     <span className="notif-dropdown-title">Notifications</span>
-                    {bellNotifs.some(n => !n.read) && (
-                      <button className="notif-mark-all" onClick={markAllNotifsRead}>Mark all as read</button>
-                    )}
+                    <div className="notif-header-actions">
+                      {bellNotifs.some(n => !n.read) && (
+                        <button className="notif-mark-all" onClick={markAllNotifsRead}>Mark all as read</button>
+                      )}
+                      {bellNotifs.length > 0 && (
+                        <button
+                          className="notif-clear-all"
+                          onClick={clearAllNotifs}
+                          disabled={bellNotifs.some(n => !n.read)}
+                          title={bellNotifs.some(n => !n.read) ? 'Read all notifications to enable Clear All' : 'Clear all notifications'}
+                        >
+                          Clear All
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="notif-list">
                     {bellNotifs.length === 0 ? (

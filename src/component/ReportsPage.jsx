@@ -2,8 +2,6 @@ import { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import '../style/ReportsPage.css';
 
-const ADMIN_EMAIL = 'admin@hepl.com';
-
 function fmtDate(v) {
   if (!v) return '';
   if (typeof v === 'number') {
@@ -48,9 +46,8 @@ function parseDateVal(v) {
 
 function inDateRange(rawVal, from, to) {
   if (!from && !to) return true;
-  const d = parseDateVal(rawVal);
-  if (!d) return true;
   const ds = toInputDate(rawVal);
+  if (!ds) return true;
   if (from && ds < from) return false;
   if (to && ds > to) return false;
   return true;
@@ -93,7 +90,7 @@ function PieChart({ slices, size=150 }) {
         return (
           <g key={i}>
             <path d={d} fill={sl.color} stroke="#fff" strokeWidth="2"/>
-            {pct>=7&&<text x={cx+r*0.62*Math.cos(mid-a/2+a/2)} y={cy+r*0.62*Math.sin(mid-a/2+a/2)} textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="700" fill="#fff">{pct}%</text>}
+            {pct>=7&&<text x={cx+r*0.62*Math.cos(mid)} y={cy+r*0.62*Math.sin(mid)} textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="700" fill="#fff">{pct}%</text>}
           </g>
         );
       })}
@@ -108,36 +105,6 @@ function exportToExcel(rows, filename) {
   XLSX.writeFile(wb, filename+'.xlsx');
 }
 
-function exportToCSV(rows, filename) {
-  if (!rows.length) return;
-  const keys = Object.keys(rows[0]);
-  const csv = [keys.join(','), ...rows.map(r=>keys.map(k=>'"'+String(r[k]??'').replace(/"/g,'""')+'"').join(','))].join('\n');
-  const blob = new Blob([csv], {type:'text/csv'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename+'.csv';
-  a.click();
-}
-
-function exportToPDF(title) {
-  const style = document.createElement('style');
-  style.innerHTML = '@media print { .rp-wrapper > *:not(.rp-print-area) { display:none!important; } .rp-no-print { display:none!important; } }';
-  document.head.appendChild(style);
-  document.title = title;
-  window.print();
-  setTimeout(()=>{ document.head.removeChild(style); }, 1000);
-}
-
-const REPORT_TYPES = [
-  { key: 'performance', label: 'Employee Performance' },
-  { key: 'project', label: 'Project Report' },
-  { key: 'daily', label: 'Daily Activity' },
-  { key: 'completed', label: 'Completed Projects' },
-  { key: 'pending', label: 'Pending Approval' },
-  { key: 'hold', label: 'Project Hold' },
-  { key: 'overdue', label: 'Deadline & Overdue' },
-];
-
 const STATUS_COLORS = {
   Assigned:           { bg:'#e0f2fe', color:'#0369a1' },
   'In Progress':      { bg:'#dbeafe', color:'#1d4ed8' },
@@ -149,45 +116,62 @@ const STATUS_COLORS = {
 };
 
 export default function ReportsPage({ currentUser, employees, tasks, projects, projectDetails, activityLogs, isAdmin, showSnack }) {
-  const [activeReport, setActiveReport] = useState('performance');
+  // staged filter inputs (not applied until Apply is clicked)
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [filterEmpName, setFilterEmpName] = useState('');
   const [filterEmpId, setFilterEmpId] = useState('');
   const [filterProject, setFilterProject] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [filterTaskStatus, setFilterTaskStatus] = useState('');
+  // applied filter state (drives card results)
+  const [applied, setApplied] = useState(null);
 
   function getDetail(name) {
     return projectDetails.find(d=>String(d.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase())||null;
   }
 
-  const allProjectNames = useMemo(()=>Array.from(new Set([
-    ...projects.map(p=>String(p?.name||p).trim()).filter(Boolean),
-    ...projectDetails.map(d=>String(d.name||'').trim()).filter(Boolean),
-    ...tasks.map(t=>String(t.Project||'').trim()).filter(Boolean),
-  ])), [projects, projectDetails, tasks]);
+  // Build unique project names from projectDetails only — the authoritative source.
+  // Using a case-insensitive dedup map so the same project is never counted twice.
+  const allProjectNames = useMemo(()=>{
+    const seen = new Map(); // normalizedName -> displayName
+    projectDetails.forEach(d=>{
+      const name = String(d.name||'').trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      if (!seen.has(key)) seen.set(key, name);
+    });
+    return Array.from(seen.values());
+  }, [projectDetails]);
 
   const empOptions = useMemo(()=>Array.from(new Set(employees.map(e=>e['Employee Name']).filter(Boolean))).sort(),[employees]);
   const empIdOptions = useMemo(()=>Array.from(new Set(employees.map(e=>e['Employee ID']).filter(Boolean))).sort(),[employees]);
-  const projOptions = useMemo(()=>allProjectNames.sort(),[allProjectNames]);
-  const statusOptions = useMemo(()=>Array.from(new Set(projectDetails.map(d=>d.status).filter(Boolean))).sort(),[projectDetails]);
+  const projOptions = useMemo(()=>allProjectNames.slice().sort(),[allProjectNames]);
 
   // ---- Dashboard Summary ----
+  // Computed directly from projectDetails to avoid double-counting.
+  // Each doc in projectDetails is one unique project record.
   const dashMetrics = useMemo(()=>{
-    const total = allProjectNames.length;
-    const completed = allProjectNames.filter(n=>{ const d=getDetail(n); return d?.status==='Completed'; }).length;
-    const inProgress = allProjectNames.filter(n=>{ const d=getDetail(n); return d?.status==='In Progress'; }).length;
-    const onHold = allProjectNames.filter(n=>{ const d=getDetail(n); return d?.status==='On Hold'; }).length;
-    const pendingApproval = allProjectNames.filter(n=>{ const d=getDetail(n); return d?.status==='Pending Approval'; }).length;
-    const overdue = allProjectNames.filter(n=>{
-      const d=getDetail(n);
-      if (!d?.deadline) return false;
-      if (d?.status==='Completed') return false;
-      return !!calcOverdue(d.deadline, d?.status||'');
+    // Deduplicate by normalized name, keeping the latest doc per project.
+    const byName = new Map();
+    projectDetails.forEach(d=>{
+      const key = String(d.name||'').trim().toLowerCase();
+      if (!key) return;
+      // Prefer the doc with a status field; if tie, keep last seen
+      if (!byName.has(key) || d.status) byName.set(key, d);
+    });
+    const docs = Array.from(byName.values());
+    const total = docs.length;
+    const completed = docs.filter(d=>d.status==='Completed').length;
+    const inProgress = docs.filter(d=>d.status==='In Progress').length;
+    const onHold = docs.filter(d=>d.status==='On Hold').length;
+    const pendingApproval = docs.filter(d=>d.status==='Pending Approval').length;
+    const now = new Date(); now.setHours(0,0,0,0);
+    const overdue = docs.filter(d=>{
+      if (!d.deadline || d.status==='Completed') return false;
+      return !!calcOverdue(d.deadline, d.status||'');
     }).length;
     return { total, completed, inProgress, onHold, pendingApproval, overdue };
-  }, [allProjectNames, projectDetails]);
+  }, [projectDetails]);
 
   const statusDistSlices = useMemo(()=>[
     { label:'Completed', value:dashMetrics.completed, color:'#10b981' },
@@ -197,220 +181,77 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
     { label:'Other', value:Math.max(0,dashMetrics.total-dashMetrics.completed-dashMetrics.inProgress-dashMetrics.onHold-dashMetrics.pendingApproval), color:'#94a3b8' },
   ], [dashMetrics]);
 
-  // ---- Employee Performance Report ----
-  const perfRows = useMemo(()=>{
-    const map = new Map();
-    employees.forEach(e=>{
-      const key = e['Employee ID']||e['Email ID']||e.id;
-      if (!key) return;
-      map.set(key,{ empName:e['Employee Name']||'', empId:e['Employee ID']||'', assigned:0, completed:0, pending:0, onHold:0 });
-    });
-    tasks.forEach(t=>{
-      const key = t['Employee ID']||t.userEmail||'';
-      if (!key) return;
-      if (!map.has(key)) map.set(key,{ empName:t['Employee Name']||'', empId:t['Employee ID']||'', assigned:0, completed:0, pending:0, onHold:0 });
-      const r = map.get(key);
-      r.assigned++;
-      const st = String(t.status||'').toLowerCase();
-      if (st==='completed') r.completed++;
-      else if (st==='pending') r.pending++;
-    });
-    allProjectNames.forEach(name=>{
-      const d=getDetail(name);
-      if (d?.status==='On Hold' && d?.heldByEmpId) {
-        const key=d.heldByEmpId;
-        if (map.has(key)) map.get(key).onHold++;
-      }
-    });
-    return Array.from(map.values()).filter(r=>{
-      if (filterEmpName && r.empName!==filterEmpName) return false;
-      if (filterEmpId && r.empId!==filterEmpId) return false;
-      return true;
-    }).map(r=>({
-      ...r,
-      completionRate: r.assigned===0?'0%':Math.round((r.completed/r.assigned)*100)+'%'
-    }));
-  }, [employees, tasks, allProjectNames, projectDetails, filterEmpName, filterEmpId]);
-
-  // ---- Project Report ----
+  // ---- Project Report rows (driven by applied filters) ----
   const projectRows = useMemo(()=>{
+    const f = applied || {};
     return allProjectNames.filter(name=>{
-      if (filterProject && name!==filterProject) return false;
+      if (f.filterProject && name!==f.filterProject) return false;
       const d=getDetail(name);
-      if (filterStatus && (d?.status||'')!==filterStatus) return false;
-      if (!inDateRange(d?.startDate||d?.createdAt, fromDate, toDate)) return false;
+      if (f.filterStatus && (d?.status||'')!==f.filterStatus) return false;
+      if (f.filterEmpName) {
+        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee Name']||'')===f.filterEmpName);
+        if (!hasEmp) return false;
+      }
+      if (f.filterEmpId) {
+        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee ID']||'')===f.filterEmpId);
+        if (!hasEmp) return false;
+      }
+      if (!inDateRange(d?.startDate||d?.createdAt, f.fromDate, f.toDate)) return false;
       return true;
     }).map(name=>{
       const d=getDetail(name);
-      const assigned = Array.from(new Set(tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()).map(t=>t['Employee Name']||'').filter(Boolean))).join(', ')||'—';
+      const projTasks = tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase());
+      const assignedEmps = Array.from(new Set(projTasks.map(t=>t['Employee Name']||'').filter(Boolean)));
+      const assignedIds = Array.from(new Set(projTasks.map(t=>t['Employee ID']||'').filter(Boolean)));
+      const totalTasks = projTasks.length;
+      const doneTasks = projTasks.filter(t=>String(t.status||'').toLowerCase()==='completed').length;
+      const progress = totalTasks===0 ? 0 : Math.round((doneTasks/totalTasks)*100);
+      const taskStatuses = Array.from(new Set(projTasks.map(t=>t.status||'').filter(Boolean)));
+      const overdueDuration = d?.deadline ? calcOverdue(d.deadline, d?.status||'') : '';
       return {
         projectName: name,
-        assignedEmployee: assigned,
+        assignedEmployee: assignedEmps.join(', ')||'—',
+        assignedIds: assignedIds.join(', ')||'—',
         assignedDate: fmtDate(d?.startDate||d?.createdAt)||'—',
         originalDeadline: d?.deadline||'—',
         currentStatus: d?.status||'—',
-        completionDate: d?.approvedAt ? fmtDateTime(d.approvedAt) : (d?.status==='Completed'?fmtDate(d?.updatedAt||'')||'—':'—'),
-      };
-    });
-  }, [allProjectNames, projectDetails, tasks, filterProject, filterStatus, fromDate, toDate]);
-
-  // ---- Daily Activity Report ----
-  const dailyRows = useMemo(()=>{
-    return tasks.filter(t=>{
-      if (filterEmpName && (t['Employee Name']||'')!==filterEmpName) return false;
-      if (filterEmpId && (t['Employee ID']||'')!==filterEmpId) return false;
-      if (filterProject && (t.Project||'')!==filterProject) return false;
-      if (filterTaskStatus && String(t.status||'').toLowerCase()!==filterTaskStatus.toLowerCase()) return false;
-      if (!inDateRange(t.Date||t.createdAt, fromDate, toDate)) return false;
-      return true;
-    }).map(t=>({
-      activityDate: fmtDate(t.Date||t.createdAt)||'—',
-      employeeName: t['Employee Name']||'—',
-      employeeId: t['Employee ID']||'—',
-      projectName: t.Project||'—',
-      taskName: t['Task Done']||'—',
-      startTime: t.startTime||'—',
-      endTime: t.endTime||'—',
-      totalWorkingHours: (t.startTime&&t.endTime) ? (()=>{ const s=new Date(t.startTime),e=new Date(t.endTime); const d=(e-s)/3600000; return d>0?d.toFixed(1)+'h':'—'; })() : '—',
-      taskStatus: t.status||'—',
-    }));
-  }, [tasks, filterEmpName, filterEmpId, filterProject, filterTaskStatus, fromDate, toDate]);
-
-  // ---- Completed Projects Report ----
-  const completedRows = useMemo(()=>{
-    return allProjectNames.filter(name=>{
-      const d=getDetail(name);
-      if (d?.status!=='Completed') return false;
-      if (filterProject && name!==filterProject) return false;
-      if (filterEmpName) {
-        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee Name']||'')===filterEmpName);
-        if (!hasEmp) return false;
-      }
-      if (!inDateRange(d?.approvedAt||d?.submittedAt, fromDate, toDate)) return false;
-      return true;
-    }).map(name=>{
-      const d=getDetail(name);
-      const emps = Array.from(new Set(tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()).map(t=>t['Employee Name']||'').filter(Boolean))).join(', ')||'—';
-      return {
-        projectName: name,
-        employeeName: emps,
-        submissionDate: d?.submittedAt ? fmtDateTime(d.submittedAt) : '—',
-        adminApprovalDate: d?.approvedAt ? fmtDateTime(d.approvedAt) : '—',
-        completionStatus: d?.status||'Completed',
-      };
-    });
-  }, [allProjectNames, projectDetails, tasks, filterProject, filterEmpName, fromDate, toDate]);
-
-  // ---- Pending Approval Report ----
-  const pendingRows = useMemo(()=>{
-    return allProjectNames.filter(name=>{
-      const d=getDetail(name);
-      if (d?.status!=='Pending Approval') return false;
-      if (filterProject && name!==filterProject) return false;
-      if (filterEmpName) {
-        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee Name']||'')===filterEmpName);
-        if (!hasEmp) return false;
-      }
-      if (!inDateRange(d?.submittedAt, fromDate, toDate)) return false;
-      return true;
-    }).map(name=>{
-      const d=getDetail(name);
-      const emps = Array.from(new Set(tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()).map(t=>t['Employee Name']||'').filter(Boolean))).join(', ')||'—';
-      return {
-        projectName: name,
-        employeeName: emps,
-        submissionDate: d?.submittedAt ? fmtDateTime(d.submittedAt) : '—',
-        approvalStatus: 'Pending Approval',
-      };
-    });
-  }, [allProjectNames, projectDetails, tasks, filterProject, filterEmpName, fromDate, toDate]);
-
-  // ---- Project Hold Report ----
-  const holdRows = useMemo(()=>{
-    return allProjectNames.filter(name=>{
-      const d=getDetail(name);
-      if (!d?.holdDate && !activityLogs.some(a=>a.projectName===name&&a.type==='Hold')) return false;
-      if (filterProject && name!==filterProject) return false;
-      if (filterEmpName) {
-        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee Name']||'')===filterEmpName);
-        if (!hasEmp) return false;
-      }
-      if (!inDateRange(d?.holdDate, fromDate, toDate)) return false;
-      return true;
-    }).map(name=>{
-      const d=getDetail(name);
-      const emps = Array.from(new Set(tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()).map(t=>t['Employee Name']||'').filter(Boolean))).join(', ')||'—';
-      const holdHistory = activityLogs.filter(a=>a.projectName===name&&a.type==='Hold').map(a=>`${fmtDateTime(a.timestamp)}: ${a.reason||'—'} (by ${a.byName||'—'})`).join(' | ')||'—';
-      const resumeAct = [...activityLogs].reverse().find(a=>a.projectName===name&&a.type==='Resume');
-      return {
-        projectName: name,
-        employeeName: emps,
-        holdDate: d?.holdDate ? fmtDateTime(d.holdDate) : '—',
-        holdReason: d?.holdReason||'—',
-        resumeDate: resumeAct ? fmtDateTime(resumeAct.timestamp) : '—',
-        holdHistory,
-      };
-    });
-  }, [allProjectNames, projectDetails, tasks, activityLogs, filterProject, filterEmpName, fromDate, toDate]);
-
-  // ---- Deadline & Overdue Report ----
-  const overdueRows = useMemo(()=>{
-    return allProjectNames.filter(name=>{
-      const d=getDetail(name);
-      if (!d?.deadline) return false;
-      if (filterProject && name!==filterProject) return false;
-      if (filterStatus && (d?.status||'')!==filterStatus) return false;
-      if (filterEmpName) {
-        const hasEmp = tasks.some(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()&&(t['Employee Name']||'')===filterEmpName);
-        if (!hasEmp) return false;
-      }
-      return true;
-    }).map(name=>{
-      const d=getDetail(name);
-      const emps = Array.from(new Set(tasks.filter(t=>String(t.Project||'').trim().toLowerCase()===name.toLowerCase()).map(t=>t['Employee Name']||'').filter(Boolean))).join(', ')||'—';
-      const overdueDuration = calcOverdue(d?.deadline, d?.status||'');
-      return {
-        projectName: name,
-        employeeName: emps,
-        originalDeadline: d?.deadline||'—',
-        currentStatus: d?.status||'—',
+        completionDate: d?.approvedAt ? fmtDateTime(d.approvedAt) : (d?.status==='Completed' ? fmtDate(d?.updatedAt||'')||'—' : '—'),
         overdueDuration: overdueDuration||'On Time',
         isOverdue: !!overdueDuration,
+        progress,
+        totalTasks,
+        doneTasks,
+        taskStatuses,
       };
     });
-  }, [allProjectNames, projectDetails, tasks, filterProject, filterStatus, filterEmpName]);
+  }, [applied, allProjectNames, projectDetails, tasks]);
 
-  function getActiveRows() {
-    switch(activeReport) {
-      case 'performance': return perfRows.map(r=>({ 'Employee Name':r.empName,'Employee ID':r.empId,'Total Assigned':r.assigned,'Completed':r.completed,'Pending':r.pending,'On Hold':r.onHold,'Completion Rate':r.completionRate }));
-      case 'project': return projectRows.map(r=>({ 'Project Name':r.projectName,'Assigned Employee':r.assignedEmployee,'Assigned Date':r.assignedDate,'Original Deadline':r.originalDeadline,'Current Status':r.currentStatus,'Completion Date':r.completionDate }));
-      case 'daily': return dailyRows.map(r=>({ 'Date':r.activityDate,'Employee Name':r.employeeName,'Employee ID':r.employeeId,'Project':r.projectName,'Task':r.taskName,'Start Time':r.startTime,'End Time':r.endTime,'Total Hours':r.totalWorkingHours,'Status':r.taskStatus }));
-      case 'completed': return completedRows.map(r=>({ 'Project Name':r.projectName,'Employee Name':r.employeeName,'Submission Date':r.submissionDate,'Admin Approval Date':r.adminApprovalDate,'Completion Status':r.completionStatus }));
-      case 'pending': return pendingRows.map(r=>({ 'Project Name':r.projectName,'Employee Name':r.employeeName,'Submission Date':r.submissionDate,'Approval Status':r.approvalStatus }));
-      case 'hold': return holdRows.map(r=>({ 'Project Name':r.projectName,'Employee Name':r.employeeName,'Hold Date':r.holdDate,'Hold Reason':r.holdReason,'Resume Date':r.resumeDate,'Hold History':r.holdHistory }));
-      case 'overdue': return overdueRows.map(r=>({ 'Project Name':r.projectName,'Employee Name':r.employeeName,'Original Deadline':r.originalDeadline,'Current Status':r.currentStatus,'Overdue Duration':r.overdueDuration }));
-      default: return [];
-    }
+  function handleExport() {
+    if (!projectRows.length) { showSnack('No data to export','info'); return; }
+    exportToExcel(projectRows.map(r=>({
+      'Project Name': r.projectName,
+      'Assigned Employee': r.assignedEmployee,
+      'Employee ID': r.assignedIds,
+      'Assigned Date': r.assignedDate,
+      'Original Deadline': r.originalDeadline,
+      'Current Status': r.currentStatus,
+      'Completion Date': r.completionDate,
+      'Overdue Duration': r.overdueDuration,
+      'Progress': r.progress+'%',
+    })), 'Project_Report');
   }
 
-  const activeRows = getActiveRows();
-
-  function handleExport(type) {
-    const rows = activeRows;
-    if (!rows.length) { showSnack('No data to export','info'); return; }
-    const label = REPORT_TYPES.find(r=>r.key===activeReport)?.label||activeReport;
-    const filename = label.replace(/\s+/g,'_')+'_Report';
-    if (type==='excel') exportToExcel(rows, filename);
-    else if (type==='csv') exportToCSV(rows, filename);
-    else exportToPDF(label+' Report');
+  function applyFilters() {
+    setApplied({ fromDate, toDate, filterEmpName, filterEmpId, filterProject, filterStatus });
   }
 
-  function clearFilters() {
+  function resetFilters() {
     setFromDate(''); setToDate(''); setFilterEmpName(''); setFilterEmpId('');
-    setFilterProject(''); setFilterStatus(''); setFilterTaskStatus('');
+    setFilterProject(''); setFilterStatus('');
+    setApplied(null);
   }
 
-  const hasFilters = fromDate||toDate||filterEmpName||filterEmpId||filterProject||filterStatus||filterTaskStatus;
+  const hasFilters = fromDate||toDate||filterEmpName||filterEmpId||filterProject||filterStatus;
 
   if (!isAdmin) {
     return (
@@ -433,17 +274,9 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
           <p className="rp-subtitle">Admin analytics — all data from live database</p>
         </div>
         <div className="rp-export-btns">
-          <button className="rp-export-btn rp-export-excel" onClick={()=>handleExport('excel')}>
+          <button className="rp-export-btn rp-export-excel" onClick={handleExport}>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Excel
-          </button>
-          <button className="rp-export-btn rp-export-csv" onClick={()=>handleExport('csv')}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
-            CSV
-          </button>
-          <button className="rp-export-btn rp-export-pdf" onClick={()=>handleExport('pdf')}>
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            PDF
+            Export Excel
           </button>
         </div>
       </div>
@@ -451,12 +284,12 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
       {/* Summary Cards */}
       <div className="rp-summary-cards rp-no-print">
         {[
-          { label:'Total Projects', value:dashMetrics.total, color:'#3b82f6', bg:'#eff6ff' },
-          { label:'Completed', value:dashMetrics.completed, color:'#10b981', bg:'#f0fdf4' },
-          { label:'In Progress', value:dashMetrics.inProgress, color:'#2563eb', bg:'#dbeafe' },
-          { label:'On Hold', value:dashMetrics.onHold, color:'#f59e0b', bg:'#fffbeb' },
-          { label:'Pending Approval', value:dashMetrics.pendingApproval, color:'#8b5cf6', bg:'#fdf4ff' },
-          { label:'Overdue', value:dashMetrics.overdue, color:'#ef4444', bg:'#fef2f2' },
+          { label:'Total Projects', value:dashMetrics.total, color:'#3b82f6' },
+          { label:'Completed', value:dashMetrics.completed, color:'#10b981' },
+          { label:'In Progress', value:dashMetrics.inProgress, color:'#2563eb' },
+          { label:'On Hold', value:dashMetrics.onHold, color:'#f59e0b' },
+          { label:'Pending Approval', value:dashMetrics.pendingApproval, color:'#8b5cf6' },
+          { label:'Overdue', value:dashMetrics.overdue, color:'#ef4444' },
         ].map(c=>(
           <div key={c.label} className="rp-summary-card" style={{borderTop:`3px solid ${c.color}`}}>
             <div className="rp-summary-num" style={{color:c.color}}>{c.value}</div>
@@ -507,24 +340,15 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
         </div>
       </div>
 
-      {/* Report Type Tabs */}
-      <div className="rp-tabs rp-no-print">
-        {REPORT_TYPES.map(r=>(
-          <button key={r.key} className={'rp-tab'+(activeReport===r.key?' active':'')} onClick={()=>setActiveReport(r.key)}>
-            {r.label}
-          </button>
-        ))}
-      </div>
-
       {/* Filters */}
       <div className="rp-filters rp-no-print">
         <div className="rp-filter-group">
           <label className="rp-filter-label">From Date</label>
-          <input type="date" className="rp-filter-input" value={fromDate} onChange={e=>{setFromDate(e.target.value);}}/>
+          <input type="date" className="rp-filter-input" value={fromDate} onChange={e=>setFromDate(e.target.value)}/>
         </div>
         <div className="rp-filter-group">
           <label className="rp-filter-label">To Date</label>
-          <input type="date" className="rp-filter-input" value={toDate} min={fromDate||undefined} onChange={e=>{setToDate(e.target.value);}}/>
+          <input type="date" className="rp-filter-input" value={toDate} min={fromDate||undefined} onChange={e=>setToDate(e.target.value)}/>
         </div>
         <div className="rp-filter-group">
           <label className="rp-filter-label">Employee Name</label>
@@ -554,62 +378,117 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
             {['Assigned','In Progress','On Hold','Pending Approval','Revision Required','Completed'].map(s=><option key={s} value={s}>{s}</option>)}
           </select>
         </div>
-        <div className="rp-filter-group">
-          <label className="rp-filter-label">Task Status</label>
-          <select className="rp-filter-select" value={filterTaskStatus} onChange={e=>setFilterTaskStatus(e.target.value)}>
-            <option value="">All</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Pending">Pending</option>
-            <option value="Completed">Completed</option>
-          </select>
+        <div className="rp-filter-actions">
+          <button className="rp-apply-btn" onClick={applyFilters}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Apply Filters
+          </button>
+          <button className="rp-reset-btn" onClick={resetFilters}>
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            Reset
+          </button>
         </div>
-        {hasFilters && (
-          <button className="rp-clear-btn" onClick={clearFilters}>Clear Filters</button>
-        )}
       </div>
 
-      {/* Report Tables */}
+      {/* Results: cards when filters applied, table by default */}
+      {applied ? (
+        <div className="rp-results-section">
+          <div className="rp-results-header">
+            <h3 className="rp-results-title">
+              Filtered Results
+              <span className="rp-results-count">({projectRows.length} Record{projectRows.length!==1?'s':''} Found)</span>
+            </h3>
+          </div>
+          {projectRows.length===0 ? (
+            <div className="rp-no-records">
+              <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <p>No Records Found</p>
+              <span>Try adjusting your filter criteria.</span>
+            </div>
+          ) : (
+            <div className="rp-rows-list">
+              {projectRows.map((r,i)=>{
+                const sc = STATUS_COLORS[r.currentStatus]||{bg:'#f1f5f9',color:'#475569'};
+                const progressColor = r.progress===100?'#16a34a':r.progress>=60?'#2563eb':'#3b82f6';
+                const taskSc = STATUS_COLORS[r.taskStatuses[0]]||{bg:'#f1f5f9',color:'#475569'};
+                return (
+                  <div key={i} className="rp-result-row">
+                    {/* Employee */}
+                    <div className="rp-rr-emp">
+                      <div className="rp-rr-avatar">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#2563eb" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                      </div>
+                      <div>
+                        <div className="rp-rr-name">{r.assignedEmployee}</div>
+                        <div className="rp-rr-id">{r.assignedIds}</div>
+                      </div>
+                    </div>
+                    <div className="rp-rr-divider"/>
+                    {/* Project + Dates */}
+                    <div className="rp-rr-proj">
+                      <div className="rp-rr-proj-name">Project: {r.projectName}</div>
+                      <div className="rp-rr-dates">
+                        <span className="rp-rr-date-item">
+                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                          Start: {r.assignedDate}
+                        </span>
+                        <span className="rp-rr-date-item">
+                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                          Deadline: {fmtDate(r.originalDeadline)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="rp-rr-divider"/>
+                    {/* Status + Progress */}
+                    <div className="rp-rr-status">
+                      <span className="rp-status-badge" style={{background:sc.bg,color:sc.color}}>
+                        {r.currentStatus==='Completed'&&<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{marginRight:4,verticalAlign:'middle'}}><polyline points="20 6 9 17 4 12"/></svg>}
+                        {r.currentStatus}
+                      </span>
+                      <div className="rp-rr-prog-wrap">
+                        <div className="rp-rr-prog-track">
+                          <div className="rp-rr-prog-fill" style={{width:r.progress+'%',background:progressColor}}/>
+                        </div>
+                        <span className="rp-rr-prog-pct" style={{color:progressColor}}>{r.progress}%</span>
+                      </div>
+                    </div>
+                    <div className="rp-rr-divider"/>
+                    {/* Task Status */}
+                    <div className="rp-rr-task">
+                      <div className="rp-rr-task-label">Task Status</div>
+                      {r.taskStatuses.length ? r.taskStatuses.map((ts,j)=>{
+                        const tsc = STATUS_COLORS[ts]||{bg:'#f1f5f9',color:'#475569'};
+                        return <span key={j} className="rp-status-badge" style={{background:tsc.bg,color:tsc.color,display:'block',marginTop:j>0?4:0}}>{ts}</span>;
+                      }) : <span className="rp-rr-task-label">—</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="rp-table-card">
         <div className="rp-table-header">
-          <h3 className="rp-table-title">{REPORT_TYPES.find(r=>r.key===activeReport)?.label} Report</h3>
-          <span className="rp-row-count">{activeRows.length} records</span>
+          <h3 className="rp-table-title">Project Report</h3>
+          <span className="rp-row-count">{projectRows.length} records</span>
         </div>
         <div className="rp-table-wrap">
-
-          {activeReport==='performance' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Employee Name</th><th>Employee ID</th>
-                <th>Total Assigned</th><th>Completed</th><th>Pending</th><th>On Hold</th><th>Completion Rate</th>
-              </tr></thead>
-              <tbody>
-                {perfRows.length===0 ? <tr><td colSpan={8} className="rp-empty">No data found</td></tr> :
-                  perfRows.map((r,i)=>(
-                    <tr key={i} className="rp-tr">
-                      <td>{i+1}</td>
-                      <td className="rp-td-name">{r.empName||'—'}</td>
-                      <td><span className="rp-id-badge">{r.empId||'—'}</span></td>
-                      <td className="rp-td-num">{r.assigned}</td>
-                      <td className="rp-td-num rp-green">{r.completed}</td>
-                      <td className="rp-td-num rp-amber">{r.pending}</td>
-                      <td className="rp-td-num rp-orange">{r.onHold}</td>
-                      <td><span className="rp-rate-badge">{r.completionRate}</span></td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='project' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Project Name</th><th>Assigned Employee</th>
-                <th>Assigned Date</th><th>Original Deadline</th><th>Current Status</th><th>Completion Date</th>
-              </tr></thead>
-              <tbody>
-                {projectRows.length===0 ? <tr><td colSpan={7} className="rp-empty">No data found</td></tr> :
-                  projectRows.map((r,i)=>{
+          <table className="rp-table">
+            <thead><tr>
+              <th>S.No</th>
+              <th>Project Name</th>
+              <th>Assigned Employee</th>
+              <th>Assigned Date</th>
+              <th>Original Deadline</th>
+              <th>Current Status</th>
+              <th>Completion Date</th>
+              <th>Overdue Duration</th>
+            </tr></thead>
+            <tbody>
+              {projectRows.length===0
+                ? <tr><td colSpan={8} className="rp-empty">No data found</td></tr>
+                : projectRows.map((r,i)=>{
                     const sc=STATUS_COLORS[r.currentStatus]||{bg:'#f1f5f9',color:'#475569'};
                     return (
                       <tr key={i} className="rp-tr">
@@ -620,138 +499,16 @@ export default function ReportsPage({ currentUser, employees, tasks, projects, p
                         <td>{r.originalDeadline}</td>
                         <td><span className="rp-status-badge" style={{background:sc.bg,color:sc.color}}>{r.currentStatus}</span></td>
                         <td>{r.completionDate}</td>
-                      </tr>
-                    );
-                  })
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='daily' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Date</th><th>Employee Name</th><th>Emp ID</th>
-                <th>Project</th><th>Task</th><th>Start Time</th><th>End Time</th><th>Total Hours</th><th>Status</th>
-              </tr></thead>
-              <tbody>
-                {dailyRows.length===0 ? <tr><td colSpan={10} className="rp-empty">No data found</td></tr> :
-                  dailyRows.map((r,i)=>(
-                    <tr key={i} className="rp-tr">
-                      <td>{i+1}</td>
-                      <td>{r.activityDate}</td>
-                      <td className="rp-td-name">{r.employeeName}</td>
-                      <td><span className="rp-id-badge">{r.employeeId}</span></td>
-                      <td>{r.projectName}</td>
-                      <td className="rp-td-task" title={r.taskName}>{r.taskName.length>50?r.taskName.slice(0,50)+'…':r.taskName}</td>
-                      <td>{r.startTime}</td>
-                      <td>{r.endTime}</td>
-                      <td>{r.totalWorkingHours}</td>
-                      <td><span className={'rp-task-status rp-ts-'+String(r.taskStatus).toLowerCase().replace(/\s+/g,'-')}>{r.taskStatus}</span></td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='completed' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Project Name</th><th>Employee Name</th>
-                <th>Submission Date</th><th>Admin Approval Date</th><th>Completion Status</th>
-              </tr></thead>
-              <tbody>
-                {completedRows.length===0 ? <tr><td colSpan={6} className="rp-empty">No completed projects found</td></tr> :
-                  completedRows.map((r,i)=>(
-                    <tr key={i} className="rp-tr">
-                      <td>{i+1}</td>
-                      <td className="rp-td-name">{r.projectName}</td>
-                      <td>{r.employeeName}</td>
-                      <td>{r.submissionDate}</td>
-                      <td>{r.adminApprovalDate}</td>
-                      <td><span className="rp-status-badge" style={{background:'#dcfce7',color:'#15803d'}}>{r.completionStatus}</span></td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='pending' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Project Name</th><th>Employee Name</th>
-                <th>Submission Date</th><th>Approval Status</th>
-              </tr></thead>
-              <tbody>
-                {pendingRows.length===0 ? <tr><td colSpan={5} className="rp-empty">No pending approval projects</td></tr> :
-                  pendingRows.map((r,i)=>(
-                    <tr key={i} className="rp-tr">
-                      <td>{i+1}</td>
-                      <td className="rp-td-name">{r.projectName}</td>
-                      <td>{r.employeeName}</td>
-                      <td>{r.submissionDate}</td>
-                      <td><span className="rp-status-badge" style={{background:'#fdf4ff',color:'#9333ea'}}>{r.approvalStatus}</span></td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='hold' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Project Name</th><th>Employee Name</th>
-                <th>Hold Date</th><th>Hold Reason</th><th>Resume Date</th><th>Hold History</th>
-              </tr></thead>
-              <tbody>
-                {holdRows.length===0 ? <tr><td colSpan={7} className="rp-empty">No projects on hold</td></tr> :
-                  holdRows.map((r,i)=>(
-                    <tr key={i} className="rp-tr">
-                      <td>{i+1}</td>
-                      <td className="rp-td-name">{r.projectName}</td>
-                      <td>{r.employeeName}</td>
-                      <td>{r.holdDate}</td>
-                      <td className="rp-td-reason" title={r.holdReason}>{r.holdReason.length>60?r.holdReason.slice(0,60)+'…':r.holdReason}</td>
-                      <td>{r.resumeDate}</td>
-                      <td className="rp-td-history" title={r.holdHistory}>{r.holdHistory.length>80?r.holdHistory.slice(0,80)+'…':r.holdHistory}</td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
-          )}
-
-          {activeReport==='overdue' && (
-            <table className="rp-table">
-              <thead><tr>
-                <th>S.No</th><th>Project Name</th><th>Employee Name</th>
-                <th>Original Deadline</th><th>Current Status</th><th>Overdue Duration</th>
-              </tr></thead>
-              <tbody>
-                {overdueRows.length===0 ? <tr><td colSpan={6} className="rp-empty">No data found</td></tr> :
-                  overdueRows.map((r,i)=>{
-                    const sc=STATUS_COLORS[r.currentStatus]||{bg:'#f1f5f9',color:'#475569'};
-                    return (
-                      <tr key={i} className="rp-tr">
-                        <td>{i+1}</td>
-                        <td className="rp-td-name">{r.projectName}</td>
-                        <td>{r.employeeName}</td>
-                        <td>{r.originalDeadline}</td>
-                        <td><span className="rp-status-badge" style={{background:sc.bg,color:sc.color}}>{r.currentStatus}</span></td>
                         <td><span className={r.isOverdue?'rp-overdue-badge':'rp-ontime-badge'}>{r.overdueDuration}</span></td>
                       </tr>
                     );
                   })
-                }
-              </tbody>
-            </table>
-          )}
-
+              }
+            </tbody>
+          </table>
         </div>
       </div>
+      )}
     </div>
   );
 }

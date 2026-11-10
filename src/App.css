@@ -3365,6 +3365,31 @@ select.form-input {
 
 .notif-mark-all:hover { color: #1d4ed8; text-decoration: underline; }
 
+.notif-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.notif-clear-all {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #dc2626;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+
+.notif-clear-all:hover:not(:disabled) { color: #991b1b; text-decoration: underline; }
+
+.notif-clear-all:disabled {
+  color: #cbd5e1;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+
 .notif-list {
   max-height: 380px;
   overflow-y: auto;

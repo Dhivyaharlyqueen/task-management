@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, query, orderBy, doc, updateDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { notifyRecipients } from '../services/notifyService';
 import '../style/ProjectsPage.css';
@@ -99,6 +99,8 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   const [reviewModal, setReviewModal] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
   const [adminRemark, setAdminRemark] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [deleteMyDetailsConfirm, setDeleteMyDetailsConfirm] = useState(null);
   const msgEndRef = useRef(null);
   const menuRef = useRef(null);
 
@@ -380,6 +382,26 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
     showSnack('Project created','success');
   }
 
+  async function handleDeleteProject(p) {
+    // Admin: delete only the project_details doc. Never delete from the master projects list.
+    const det = getDetail(p.name);
+    if (det) await deleteDoc(doc(db, 'project_details', det.id));
+    setDeleteConfirm(null);
+    showSnack('Project details deleted', 'success');
+  }
+
+  async function handleDeleteMyProjectDetails(p) {
+    // User: delete only their own project_details doc scoped to their email.
+    const myEmail = String(currentUser?.email || '').toLowerCase();
+    const userDoc = projectDetails.find(d =>
+      String(d.name || '').trim().toLowerCase() === String(p.name || '').trim().toLowerCase() &&
+      String(d.userEmail || '').toLowerCase() === myEmail
+    );
+    if (userDoc) await deleteDoc(doc(db, 'project_details', userDoc.id));
+    setDeleteMyDetailsConfirm(null);
+    showSnack('Your project details removed. You can re-add them anytime.', 'success');
+  }
+
   async function handleEditProject(e) {
     e.preventDefault();
     const updates = { description:form.description.trim(), startDate:fromInputDate(form.startDate), deadline:fromInputDate(form.deadline) };
@@ -504,7 +526,7 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   ];
   function canHold(status) { return ['Assigned','In Progress','Revision Required'].includes(status); }
   function canResume(status) { return status === 'On Hold'; }
-  function canSubmit(status) { return ['In Progress','Revision Required'].includes(status); }
+  function canSubmit(status) { return !['Pending Approval','Completed'].includes(status); }
   function canReview(status) { return status === 'Pending Approval'; }
 
   return (
@@ -638,7 +660,11 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                         )}
                       </td>
                       <td className="pp-td-actions">
-                        <div className="pp-menu-wrap" ref={openMenu===p.name?menuRef:null}>
+                        <div style={{display:'flex',alignItems:'center',gap:'6px',justifyContent:'center'}}>
+                          <button className="pp-delete-btn" title="Delete project" onClick={()=>setDeleteConfirm(p)}>
+                            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                          </button>
+                          <div className="pp-menu-wrap" ref={openMenu===p.name?menuRef:null}>
                           <button className="pp-menu-trigger" onClick={()=>setOpenMenu(openMenu===p.name?null:p.name)}>⋮</button>
                           {openMenu===p.name && (
                             <div className="pp-menu-dropdown">
@@ -660,6 +686,7 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                               </button>
                             </div>
                           )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -717,13 +744,16 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Resume Project
                                 </button>
                               )}
-                              {canSubmit(p.status) && (p.projectStatus==='Open'||p.projectStatus==='In Progress') && (
+                              {canSubmit(p.status) && (
                                 <button className="pp-menu-item pp-btn-submit" onClick={()=>{setSubmitModal(p);setSubmitNote('');setOpenMenu(null);}}>
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Submit Project
                                 </button>
                               )}
                               <button className="pp-menu-item pp-btn-view" onClick={()=>{setDetailModal(p);setOpenMenu(null);}}>
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View Details
+                              </button>
+                              <button className="pp-menu-item pp-btn-delete" onClick={()=>{setDeleteMyDetailsConfirm(p);setOpenMenu(null);}}>
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete My Details
                               </button>
                             </div>
                           )}
@@ -983,6 +1013,48 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
               <button className="pp-btn-cancel" onClick={()=>setPreCloseModal(null)}>Cancel</button>
               <button className="pp-btn-approve-confirm" onClick={()=>handleFinalClose(preCloseModal)}>
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Confirm Closure
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div className="pp-overlay" onClick={()=>setDeleteConfirm(null)}>
+          <div className="pp-modal" onClick={e=>e.stopPropagation()}>
+            <div className="pp-modal-header">
+              <div className="pp-modal-icon" style={{background:'#fee2e2',color:'#b91c1c'}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>
+              <div><h3>Delete Project</h3><span className="pp-modal-sub">{deleteConfirm.name}</span></div>
+              <button className="pp-modal-close" onClick={()=>setDeleteConfirm(null)}>&#x2715;</button>
+            </div>
+            <div className="pp-modal-body">
+              <p style={{margin:0,fontSize:'0.88rem',color:'#475569'}}>Are you sure you want to delete the project details for <strong>{deleteConfirm?.name}</strong>? The project will remain in the master list. This action cannot be undone.</p>
+            </div>
+            <div className="pp-modal-footer">
+              <button className="pp-btn-cancel" onClick={()=>setDeleteConfirm(null)}>Cancel</button>
+              <button className="pp-btn-delete-confirm" onClick={()=>handleDeleteProject(deleteConfirm)}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteMyDetailsConfirm && (
+        <div className="pp-overlay" onClick={()=>setDeleteMyDetailsConfirm(null)}>
+          <div className="pp-modal" onClick={e=>e.stopPropagation()}>
+            <div className="pp-modal-header">
+              <div className="pp-modal-icon" style={{background:'#fee2e2',color:'#b91c1c'}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>
+              <div><h3>Delete My Project Details</h3><span className="pp-modal-sub">{deleteMyDetailsConfirm.name}</span></div>
+              <button className="pp-modal-close" onClick={()=>setDeleteMyDetailsConfirm(null)}>&#x2715;</button>
+            </div>
+            <div className="pp-modal-body">
+              <p style={{margin:0,fontSize:'0.88rem',color:'#475569'}}>This will remove only <strong>your</strong> project details for <strong>{deleteMyDetailsConfirm.name}</strong>. The project will remain available in the dropdown — you can re-add your details anytime. Other employees' records are not affected.</p>
+            </div>
+            <div className="pp-modal-footer">
+              <button className="pp-btn-cancel" onClick={()=>setDeleteMyDetailsConfirm(null)}>Cancel</button>
+              <button className="pp-btn-delete-confirm" onClick={()=>handleDeleteMyProjectDetails(deleteMyDetailsConfirm)}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>Delete My Details
               </button>
             </div>
           </div>
