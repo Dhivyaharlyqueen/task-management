@@ -38,6 +38,15 @@ const STATUS_COLORS = {
   Completed:          { bg:'#dcfce7', color:'#15803d' },
   Active:             { bg:'#dcfce7', color:'#15803d' },
 };
+const PROJECT_STATUSES = ['Open','In Progress','Hold','Pre-Closed','Closed'];
+const PROJECT_STATUS_COLORS = {
+  'Open':        { bg:'#dbeafe', color:'#1d4ed8' },
+  'In Progress': { bg:'#e0f2fe', color:'#0284c7' },
+  'Hold':        { bg:'#fef3c7', color:'#b45309' },
+  'Pre-Closed':  { bg:'#f3e8ff', color:'#7c3aed' },
+  'Closed':      { bg:'#dcfce7', color:'#15803d' },
+  'On Hold (Client)': { bg:'#ffedd5', color:'#c2410c' },
+};
 const AV_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#14b8a6'];
 function avColor(name) { let h=0; for(let i=0;i<(name||'').length;i++) h=(h+name.charCodeAt(i))%AV_COLORS.length; return AV_COLORS[h]; }
 function initials(name) { return (name||'?').split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,2)||'?'; }
@@ -83,6 +92,8 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   const [replyText, setReplyText] = useState('');
   const [form, setForm] = useState({ name:'', description:'', startDate:todayInput(), deadline:'', assignedEmails:[] });
   const [openMenu, setOpenMenu] = useState(null);
+  const [projStatusSaving, setProjStatusSaving] = useState(null);
+  const [preCloseModal, setPreCloseModal] = useState(null);
   const [submitModal, setSubmitModal] = useState(null);
   const [submitNote, setSubmitNote] = useState('');
   const [reviewModal, setReviewModal] = useState(null);
@@ -132,6 +143,40 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
 
   function getDetail(name) {
     return projectDetails.find(d=>String(d.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase())||null;
+  }
+  function getProjectStatus(name) {
+    const det = getDetail(name);
+    return det?.projectStatus || 'Open';
+  }
+  async function handleProjectStatusChange(name, newStatus) {
+    setProjStatusSaving(name);
+    const det = getDetail(name);
+    const updates = { projectStatus: newStatus };
+    if (newStatus === 'Closed') updates.closedAt = Date.now();
+    if (det) {
+      await updateDoc(doc(db,'project_details',det.id), updates);
+    } else {
+      await addDoc(collection(db,'project_details'),{name,createdAt:Date.now(),...updates});
+    }
+    if (newStatus === 'Closed') {
+      await notifyRecipients(emailsForProject(name), {
+        type:'project_update', summary:'closed the project', actorName:'Admin', projectName:name, createdAt:Date.now()
+      }, currentUser?.email);
+    }
+    setProjStatusSaving(null);
+    showSnack('Project status updated to '+newStatus,'success');
+  }
+  async function handleFinalClose(p) {
+    const det = getDetail(p.name);
+    const updates = { projectStatus:'Closed', closedAt:Date.now(), closedBy:currentUser?.email||'' };
+    if (det) { await updateDoc(doc(db,'project_details',det.id), updates); }
+    else { await addDoc(collection(db,'project_details'),{name:p.name,createdAt:Date.now(),...updates}); }
+    await logActivity(p.name,'Close',{closedAt:Date.now()});
+    await notifyRecipients(emailsForProject(p.name), {
+      type:'project_update', summary:'finalized and closed the project', actorName:'Admin', projectName:p.name, createdAt:Date.now()
+    }, currentUser?.email);
+    setPreCloseModal(null);
+    showSnack('Project closed successfully','success');
   }
   function getUserDetail(name, userEmail) {
     const email = String(userEmail||'').toLowerCase();
@@ -318,7 +363,6 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   async function handleAddProject(e) {
     e.preventDefault();
     if (!form.name.trim()) { showSnack('Project name required','error'); return; }
-    if (projects.some(p=>String(p?.name||p).trim().toLowerCase()===form.name.trim().toLowerCase())) { showSnack('Project already exists','info'); return; }
     await addDoc(collection(db,'project_details'),{name:form.name.trim(),description:form.description.trim(),startDate:fromInputDate(form.startDate),deadline:fromInputDate(form.deadline),assignedEmails:form.assignedEmails,status:'Assigned',createdAt:Date.now(),createdBy:currentUser?.email||''});
     await addDoc(collection(db,'projects'),{name:form.name.trim(),createdAt:Date.now(),createdBy:currentUser?.email||''});
     // Fan-out project request notifications
@@ -388,10 +432,11 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   const enriched = allNames.map(name => {
     const det = getDetail(name);
     const status = det?.status || getStatus(name);
+    const projectStatus = getProjectStatus(name);
     const progress = getProgress(name);
     const assigned = getAssigned(name);
     const pendingReqs = deadlineRequests.filter(r=>r.projectName===name&&r.status==='Pending');
-    return { name, det, status, progress, assigned, pendingReqs };
+    return { name, det, status, projectStatus, progress, assigned, pendingReqs };
   });
   const myProjectNames = new Set(
     tasks.filter(t=>String(t.userEmail||'').toLowerCase()===myEmail).map(t=>String(t.Project||'').trim()).filter(Boolean)
@@ -399,10 +444,11 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
   const myEnriched = allNames.filter(name=>myProjectNames.has(name)).map(name => {
     const det = getUserDetail(name, myEmail);
     const status = det?.status || getStatus(name, myEmail);
+    const projectStatus = getProjectStatus(name);
     const progress = getMyProgress(name);
     const assigned = getAssigned(name);
     const pendingReqs = deadlineRequests.filter(r=>r.projectName===name&&r.status==='Pending');
-    return { name, det, status, progress, assigned, pendingReqs };
+    return { name, det, status, projectStatus, progress, assigned, pendingReqs };
   });
   const source = isAdmin ? enriched : myEnriched;
   const allEmpOptions = Array.from(new Set(enriched.flatMap(p=>p.assigned.map(e=>e.name)).filter(Boolean))).sort();
@@ -525,7 +571,8 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                 <th>Start Date</th>
                 <th>Deadline</th>
                 <th>Hold Date</th>
-                <th>Status</th>
+                <th>Task Status</th>
+                <th>Project Status</th>
                 <th>Progress</th>
                 <th>Hold Reason</th>
                 <th className="pp-th-actions">Actions</th>
@@ -565,6 +612,14 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                       <td className="pp-td-date">{p.det?.deadline||'—'}</td>
                       <td className="pp-td-date">{p.det?.holdDate?formatDate(p.det.holdDate):'—'}</td>
                       <td className="pp-td-status"><span className="pp-status-badge" style={{background:sc.bg,color:sc.color}}>{p.status}</span></td>
+                      <td className="pp-td-status">
+                        {projStatusSaving===p.name
+                          ? <span className="pp-status-badge" style={{background:'#f1f5f9',color:'#64748b'}}>Saving…</span>
+                          : <select className="pp-proj-status-select" value={p.projectStatus} onChange={e=>handleProjectStatusChange(p.name,e.target.value)} style={{background:PROJECT_STATUS_COLORS[p.projectStatus]?.bg,color:PROJECT_STATUS_COLORS[p.projectStatus]?.color}}>
+                              {PROJECT_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+                            </select>
+                        }
+                      </td>
                       <td className="pp-td-progress"><CircularProgress pct={p.progress}/></td>
                       <td className="pp-td-reason">
                         {p.det?.holdReason ? <span className="pp-reason-text" title={p.det.holdReason}>{p.det.holdReason.slice(0,40)}{p.det.holdReason.length>40?'…':''}</span> : <span className="pp-no-emp">—</span>}
@@ -595,6 +650,11 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Review
                                 </button>
                               )}
+                              {p.projectStatus==='Pre-Closed' && (
+                                <button className="pp-menu-item pp-btn-finalize" onClick={()=>{setPreCloseModal(p);setOpenMenu(null);}}>
+                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Finalize Closure
+                                </button>
+                              )}
                               <button className="pp-menu-item pp-btn-edit" onClick={()=>{openEdit(p);setOpenMenu(null);}}>
                                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>Edit
                               </button>
@@ -617,7 +677,8 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                 <th>Description</th>
                 <th>Assigned Date</th>
                 <th>Deadline</th>
-                <th>Status</th>
+                <th>Task Status</th>
+                <th>Project Status</th>
                 <th>My Progress</th>
                 <th className="pp-th-actions">Actions</th>
               </tr></thead>
@@ -639,23 +700,24 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                       <td className="pp-td-date">{assignedDate}</td>
                       <td className="pp-td-date">{p.det?.deadline||'—'}</td>
                       <td className="pp-td-status"><span className="pp-status-badge" style={{background:sc.bg,color:sc.color}}>{p.status}</span></td>
+                      <td className="pp-td-status">{(()=>{const psc=PROJECT_STATUS_COLORS[p.projectStatus]||PROJECT_STATUS_COLORS['Open'];return <span className="pp-status-badge" style={{background:psc.bg,color:psc.color}}>{p.projectStatus}</span>;})()}</td>
                       <td className="pp-td-progress"><CircularProgress pct={myProg}/></td>
                       <td className="pp-td-actions">
                         <div className="pp-menu-wrap" ref={openMenu===p.name?menuRef:null}>
                           <button className="pp-menu-trigger" onClick={()=>setOpenMenu(openMenu===p.name?null:p.name)}>⋮</button>
                           {openMenu===p.name && (
                             <div className="pp-menu-dropdown">
-                              {canHold(p.status) && (
+                              {canHold(p.status) && p.projectStatus==='Open' && (
                                 <button className="pp-menu-item pp-btn-hold" onClick={()=>{setHoldModal(p);setHoldReason('');setHoldReasonError(false);setOpenMenu(null);}}>
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>Hold Deadline
                                 </button>
                               )}
-                              {canResume(p.status) && (
+                              {canResume(p.status) && p.projectStatus==='Open' && (
                                 <button className="pp-menu-item pp-btn-resume" onClick={()=>{handleResume(p);setOpenMenu(null);}}>
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>Resume Project
                                 </button>
                               )}
-                              {canSubmit(p.status) && (
+                              {canSubmit(p.status) && (p.projectStatus==='Open'||p.projectStatus==='In Progress') && (
                                 <button className="pp-menu-item pp-btn-submit" onClick={()=>{setSubmitModal(p);setSubmitNote('');setOpenMenu(null);}}>
                                   <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Submit Project
                                 </button>
@@ -784,7 +846,8 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
             </div>
             <div className="pp-modal-body">
               <div className="pp-detail-grid">
-                <div className="pp-detail-field"><span className="pp-detail-label">Status</span><span className="pp-status-badge" style={{background:STATUS_COLORS[detailModal.status]?.bg,color:STATUS_COLORS[detailModal.status]?.color}}>{detailModal.status}</span></div>
+                <div className="pp-detail-field"><span className="pp-detail-label">Task Status</span><span className="pp-status-badge" style={{background:STATUS_COLORS[detailModal.status]?.bg,color:STATUS_COLORS[detailModal.status]?.color}}>{detailModal.status}</span></div>
+                <div className="pp-detail-field"><span className="pp-detail-label">Project Status</span>{(()=>{const psc=PROJECT_STATUS_COLORS[detailModal.projectStatus||'Open']||PROJECT_STATUS_COLORS['Open'];return <span className="pp-status-badge" style={{background:psc.bg,color:psc.color}}>{detailModal.projectStatus||'Open'}</span>;})()}</div>
                 <div className="pp-detail-field"><span className="pp-detail-label">Progress</span><span className="pp-detail-val">{detailModal.progress}%</span></div>
                 <div className="pp-detail-field"><span className="pp-detail-label">Start Date</span><span className="pp-detail-val">{detailModal.det?.startDate||'—'}</span></div>
                 <div className="pp-detail-field"><span className="pp-detail-label">Original Deadline</span><span className="pp-detail-val">{detailModal.det?.deadline||'—'}</span></div>
@@ -899,6 +962,29 @@ export default function ProjectsPage({ currentUser, employees, tasks, projects, 
                 <button type="submit" className="pp-btn-primary">{editModal?'Save Changes':'Create Project'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {preCloseModal && (
+        <div className="pp-overlay" onClick={()=>setPreCloseModal(null)}>
+          <div className="pp-modal" onClick={e=>e.stopPropagation()}>
+            <div className="pp-modal-header">
+              <div className="pp-modal-icon" style={{background:'#f3e8ff',color:'#7c3aed'}}><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>
+              <div><h3>Finalize Project Closure</h3><span className="pp-modal-sub">{preCloseModal.name}</span></div>
+              <button className="pp-modal-close" onClick={()=>setPreCloseModal(null)}>&#x2715;</button>
+            </div>
+            <div className="pp-modal-body">
+              <div className="pp-modal-info-row"><span className="pp-modal-info-label">Current Status</span><span className="pp-modal-info-val" style={{color:'#7c3aed',fontWeight:700}}>Pre-Closed</span></div>
+              <div className="pp-modal-info-row"><span className="pp-modal-info-label">Progress</span><span className="pp-modal-info-val">{preCloseModal.progress}%</span></div>
+              <p style={{fontSize:'0.84rem',color:'#475569',margin:'4px 0 0'}}>All tasks have been completed and approved. Confirm final closure to mark this project as <strong>Closed</strong> and notify all team members.</p>
+            </div>
+            <div className="pp-modal-footer">
+              <button className="pp-btn-cancel" onClick={()=>setPreCloseModal(null)}>Cancel</button>
+              <button className="pp-btn-approve-confirm" onClick={()=>handleFinalClose(preCloseModal)}>
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Confirm Closure
+              </button>
+            </div>
           </div>
         </div>
       )}
