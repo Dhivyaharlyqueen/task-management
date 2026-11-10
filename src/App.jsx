@@ -422,14 +422,7 @@ function App() {
   const [projectName, setProjectName] = useState("");
   const [projectDetails, setProjectDetails] = useState([]);
   const [activityLogs, setActivityLogs] = useState([]);
-  const [projects, setProjects] = useState(() => {
-    try {
-      const saved = localStorage.getItem("saved_projects");
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const [projects, setProjects] = useState([]);
   const [projectSearch, setProjectSearch] = useState("");
   const [isProjectDropdownOpen, setIsProjectDropdownOpen] = useState(false);
   const projectDropdownRef = useRef(null);
@@ -746,9 +739,13 @@ function App() {
       const next = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
       tasksRef.current = next;
       setTasks(next);
+      if (isAdmin && !importedRef.current) {
+        importedRef.current = true;
+        loadFromSheets(next, true);
+      }
     });
     return unsubscribe;
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     const q = query(collection(db, "projects"), orderBy("createdAt"));
@@ -756,11 +753,6 @@ function App() {
       const next = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
       projectsRef.current = next;
       setProjects(next);
-      try {
-        localStorage.setItem("saved_projects", JSON.stringify(next));
-      } catch {
-        // ignore
-      }
     });
   }, []);
 
@@ -921,51 +913,25 @@ function App() {
       return existingName;
     }
     try {
-      const docRef = await addDoc(collection(db, "projects"), {
+      await addDoc(collection(db, "projects"), {
         name,
         createdAt: Date.now(),
         createdBy: currentUser?.email || (isAdmin ? ADMIN_EMAIL : "User"),
       });
-      const newProj = { id: docRef.id, name, createdAt: Date.now() };
-      projectsRef.current = [...projectsRef.current, newProj];
-      setProjects((prev) => {
-        if (prev.some((p) => String(p?.name || p).trim().toLowerCase() === name.toLowerCase())) {
-          return prev;
-        }
-        return [...prev, newProj];
-      });
-      try {
-        localStorage.setItem("saved_projects", JSON.stringify(projectsRef.current));
-      } catch {
-        // ignore
-      }
+      // State will update via the onSnapshot listener — no manual setProjects needed
       setProject(name);
       if (isAdmin) setAdminSelectedProject(name);
       setIsProjectDropdownOpen(false);
       setIsAdminProjectDropdownOpen(false);
       setProjectSearch("");
       setAdminProjectSearch("");
-      await syncProjects(projectsRef.current);
+      await syncProjects([...projectsRef.current, { name }]);
       showSnack("Project added successfully", "success");
       return name;
     } catch (err) {
       console.error("Error adding project:", err);
-      const newProj = { id: `local_${Date.now()}`, name, createdAt: Date.now() };
-      projectsRef.current = [...projectsRef.current, newProj];
-      setProjects((prev) => [...prev, newProj]);
-      try {
-        localStorage.setItem("saved_projects", JSON.stringify(projectsRef.current));
-      } catch {
-        // ignore
-      }
-      setProject(name);
-      if (isAdmin) setAdminSelectedProject(name);
-      setIsProjectDropdownOpen(false);
-      setIsAdminProjectDropdownOpen(false);
-      setProjectSearch("");
-      setAdminProjectSearch("");
-      showSnack("Project added successfully", "success");
-      return name;
+      showSnack("Failed to add project. Check your connection.", "error");
+      return null;
     }
   }
 
@@ -981,41 +947,60 @@ function App() {
     e.stopPropagation();
     if (!isAdmin) return;
 
+    const nameLower = projectName.trim().toLowerCase();
+
     try {
-      const matches = projects.filter(
-        (item) => String(item?.name || item).trim().toLowerCase() === projectName.trim().toLowerCase()
-      );
-      for (const m of matches) {
-        if (m?.id && !String(m.id).startsWith("local_")) {
-          await deleteDoc(doc(db, "projects", m.id));
-        }
+      // Delete from `projects` collection
+      const projSnap = await getDocs(query(collection(db, "projects"), where("name", "==", projectName.trim())));
+      for (const d of projSnap.docs) await deleteDoc(d.ref);
+
+      // Delete from `project_details` collection
+      const detSnap = await getDocs(collection(db, "project_details"));
+      for (const d of detSnap.docs) {
+        if (String(d.data().name || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
       }
-      const q = query(collection(db, "projects"), where("name", "==", projectName.trim()));
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        await deleteDoc(d.ref);
+
+      // Delete associated tasks
+      const taskSnap = await getDocs(query(collection(db, "tasks"), where("Project", "==", projectName.trim())));
+      for (const d of taskSnap.docs) await deleteDoc(d.ref);
+
+      // Delete project activity logs
+      const actSnap = await getDocs(collection(db, "project_activity"));
+      for (const d of actSnap.docs) {
+        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
+      }
+
+      // Delete project messages
+      const msgSnap = await getDocs(collection(db, "project_messages"));
+      for (const d of msgSnap.docs) {
+        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
+      }
+
+      // Delete deadline requests
+      const dreqSnap = await getDocs(collection(db, "deadline_requests"));
+      for (const d of dreqSnap.docs) {
+        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
+      }
+
+      // Delete related notifications
+      const notifSnap = await getDocs(collection(db, "notifications"));
+      for (const d of notifSnap.docs) {
+        if (String(d.data().projectName || "").trim().toLowerCase() === nameLower) await deleteDoc(d.ref);
       }
     } catch (err) {
-      console.error("Error removing project from Firestore:", err);
+      console.error("Error deleting project data from Firestore:", err);
     }
 
-    const updated = projectsRef.current.filter(
-      (item) => String(item?.name || item).trim().toLowerCase() !== projectName.trim().toLowerCase()
-    );
-    projectsRef.current = updated;
-    setProjects(updated);
+    // Clear localStorage cache so deleted project never reappears on refresh
     try {
-      localStorage.setItem("saved_projects", JSON.stringify(updated));
+      localStorage.removeItem("saved_projects");
     } catch {
       // ignore
     }
-    if (adminSelectedProject.trim().toLowerCase() === projectName.trim().toLowerCase()) {
-      setAdminSelectedProject("");
-    }
-    if (project.trim().toLowerCase() === projectName.trim().toLowerCase()) {
-      setProject("");
-    }
-    await syncProjects(updated);
+
+    if (adminSelectedProject.trim().toLowerCase() === nameLower) setAdminSelectedProject("");
+    if (project.trim().toLowerCase() === nameLower) setProject("");
+
     showSnack("Project deleted", "success");
   }
 
@@ -1147,6 +1132,18 @@ function App() {
       showSnack(projects.length === 0 ? "Please select or add a project" : "Please fill all fields", "error");
       return;
     }
+    if (!isAdmin) {
+      const projDet = projectDetails.find(d => String(d.name||'').trim().toLowerCase() === project.trim().toLowerCase());
+      const projStatus = projDet?.projectStatus || 'Open';
+      if (projStatus === 'Closed' || projStatus === 'Pre-Closed') {
+        showSnack(`This project is ${projStatus}. No new tasks can be submitted.`, 'error');
+        return;
+      }
+      if (projStatus === 'On Hold (Client)') {
+        showSnack('This project is On Hold (Client). No new tasks can be submitted.', 'error');
+        return;
+      }
+    }
     const data = {
       Date: fromInputDate(taskDate),
       Project: project,
@@ -1172,14 +1169,81 @@ function App() {
   }
 
   async function handleSubmitForReview(taskId) {
-    await updateDoc(doc(db, "tasks", taskId), { status: "Pending" });
+    const task = tasks.find(t => t.id === taskId);
+    await updateDoc(doc(db, "tasks", taskId), { status: "Pending", submittedAt: Date.now() });
+    // Notify admin
+    await addDoc(collection(db, 'notifications'), {
+      type: 'task_approval',
+      taskId,
+      taskName: task?.["Task Done"] || '',
+      projectName: task?.Project || '',
+      employeeName: task?.["Employee Name"] || '',
+      employeeEmail: task?.userEmail || '',
+      summary: 'submitted a task for review',
+      actorName: task?.["Employee Name"] || currentUser?.email || '',
+      recipientEmail: ADMIN_EMAIL,
+      read: false,
+      createdAt: Date.now(),
+    });
     showSnack("Task submitted for review", "success");
   }
 
   async function handleApproveTask(taskId) {
-    await updateDoc(doc(db, "tasks", taskId), { status: "Completed" });
+    await updateDoc(doc(db, "tasks", taskId), { status: "Completed", approvedAt: Date.now() });
     setViewingTask((prev) => prev ? { ...prev, status: "Completed" } : null);
+    // Notify the task owner
+    const t = tasks.find(t => t.id === taskId);
+    let ownerEmail = String(t?.userEmail || '').trim().toLowerCase();
+    if (!ownerEmail && t) {
+      const emp = employees.find(e => String(e["Employee ID"]||'').trim() === String(t["Employee ID"]||'').trim());
+      ownerEmail = String(emp?.["Email ID"]||'').trim().toLowerCase();
+    }
+    if (ownerEmail && ownerEmail !== ADMIN_EMAIL) {
+      await addDoc(collection(db, 'notifications'), {
+        type: 'task_approval_result', taskId, taskName: t?.["Task Done"]||'',
+        projectName: t?.Project||'', result: 'approved', actorName: 'Admin',
+        summary: 'approved your task', recipientEmail: ownerEmail, read: false, createdAt: Date.now(),
+      });
+    }
+    // Check if all tasks for this project are now completed → set Pre-Closed
+    if (t?.Project) {
+      const projName = t.Project.trim();
+      const projTasks = tasks.filter(pt => String(pt.Project||'').trim().toLowerCase() === projName.toLowerCase());
+      const allDone = projTasks.length > 0 && projTasks.every(pt => pt.id === taskId ? true : String(pt.status||'').toLowerCase() === 'completed');
+      if (allDone) {
+        const projDet = projectDetails.find(d => String(d.name||'').trim().toLowerCase() === projName.toLowerCase());
+        if (projDet && projDet.projectStatus !== 'Closed' && projDet.projectStatus !== 'Pre-Closed') {
+          await updateDoc(doc(db, 'project_details', projDet.id), { projectStatus: 'Pre-Closed', preClosedAt: Date.now() });
+          await addDoc(collection(db, 'notifications'), {
+            type: 'project_update', summary: 'All tasks completed — project is ready for final closure',
+            actorName: 'System', projectName: projName, recipientEmail: ADMIN_EMAIL, read: false, createdAt: Date.now(),
+          });
+          showSnack(`All tasks in "${projName}" completed — project set to Pre-Closed`, 'success');
+          return;
+        }
+      }
+    }
     showSnack("Task approved and marked as Completed", "success");
+  }
+
+  async function handleRejectTask(taskId, reason) {
+    await updateDoc(doc(db, "tasks", taskId), { status: "In Progress", rejectedAt: Date.now(), rejectReason: reason || '' });
+    setViewingTask((prev) => prev ? { ...prev, status: "In Progress" } : null);
+    const t = tasks.find(t => t.id === taskId);
+    let ownerEmail = String(t?.userEmail || '').trim().toLowerCase();
+    if (!ownerEmail && t) {
+      const emp = employees.find(e => String(e["Employee ID"]||'').trim() === String(t["Employee ID"]||'').trim());
+      ownerEmail = String(emp?.["Email ID"]||'').trim().toLowerCase();
+    }
+    if (ownerEmail && ownerEmail !== ADMIN_EMAIL) {
+      await addDoc(collection(db, 'notifications'), {
+        type: 'task_approval_result', taskId, taskName: t?.["Task Done"]||'',
+        projectName: t?.Project||'', result: 'rejected', reason: reason||'',
+        actorName: 'Admin', summary: 'rejected your task submission',
+        recipientEmail: ownerEmail, read: false, createdAt: Date.now(),
+      });
+    }
+    showSnack("Task rejected — employee notified", "success");
   }
 
   async function removeTask(id) {
@@ -1244,6 +1308,7 @@ function App() {
     loadingRef.current = true;
     setLoadingSheets(true);
     try {
+
       const directory = await importDirectories();
       const rows = await fetchSheetRows();
       const sheetItems = [];
@@ -3027,10 +3092,12 @@ function App() {
                         const isProjMsg = n.type === 'project_message';
                         const isTaskRemark = n.type === 'task_remark';
                         const isProjectUpdate = n.type === 'project_update';
-                        const avatarBg = isProjectReq ? '#2563eb' : isProjMsg ? '#0891b2' : isTaskRemark ? '#0f766e' : '#7c3aed';
+                        const isTaskApproval = n.type === 'task_approval';
+                        const isTaskResult = n.type === 'task_approval_result';
+                        const avatarBg = isProjectReq ? '#2563eb' : isProjMsg ? '#0891b2' : isTaskRemark ? '#0f766e' : isTaskApproval ? '#7c3aed' : isTaskResult ? (n.result==='approved'?'#15803d':'#be185d') : '#7c3aed';
                         const avatarInitial = isTaskRemark
                           ? (n.adminEmail || 'A').charAt(0).toUpperCase()
-                          : (n.requesterName || n.senderName || '?').charAt(0).toUpperCase();
+                          : (n.requesterName || n.senderName || n.actorName || n.employeeName || '?').charAt(0).toUpperCase();
                         return (
                           <div key={n.id} className={`notif-item${n.read ? '' : ' notif-unread'}`}>
                             <div className="notif-item-avatar" style={{ background: avatarBg }}>
@@ -3080,6 +3147,30 @@ function App() {
                                   </p>
                                   <p className="notif-item-title">"{n.remark}"</p>
                                   <p className="notif-item-meta">{timeAgoNotif(n.createdAt)}</p>
+                                  <button
+                                    className="notif-view-btn"
+                                    onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('my-tasks'); }}
+                                  >View Task</button>
+                                </>
+                              ) : isTaskApproval ? (
+                                <>
+                                  <p className="notif-item-text">
+                                    <strong>{n.employeeName || n.actorName}</strong> submitted a task for review
+                                  </p>
+                                  <p className="notif-item-title">"{n.taskName}"</p>
+                                  <p className="notif-item-meta">{n.projectName} · {timeAgoNotif(n.createdAt)}</p>
+                                  <button
+                                    className="notif-view-btn"
+                                    onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('my-tasks'); }}
+                                  >Review Task</button>
+                                </>
+                              ) : isTaskResult ? (
+                                <>
+                                  <p className="notif-item-text">
+                                    <strong>Admin</strong> {n.result === 'approved' ? 'approved' : 'rejected'} your task
+                                  </p>
+                                  <p className="notif-item-title">"{n.taskName}"</p>
+                                  <p className="notif-item-meta">{n.projectName} · {timeAgoNotif(n.createdAt)}</p>
                                   <button
                                     className="notif-view-btn"
                                     onClick={() => { markNotifRead(n.id); setNotifOpen(false); setActiveNav('my-tasks'); }}
@@ -3466,16 +3557,29 @@ function App() {
                             <span>{savingRemarks ? "Saving..." : "Save Remarks"}</span>
                           </button>
                           {isTaskPending && (
-                            <button
-                              type="button"
-                              className="btn-approve-task"
-                              onClick={() => handleApproveTask(viewingTask.id)}
-                            >
-                              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                              <span>Approve / Complete</span>
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                className="btn-approve-task"
+                                onClick={() => handleApproveTask(viewingTask.id)}
+                              >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                <span>Approve</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-reject-task"
+                                onClick={() => handleRejectTask(viewingTask.id, remarksText)}
+                              >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <line x1="18" y1="6" x2="6" y2="18" />
+                                  <line x1="6" y1="6" x2="18" y2="18" />
+                                </svg>
+                                <span>Reject</span>
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>

@@ -124,9 +124,9 @@ export default function DailyActivitiesPage({ currentUser, employees, tasks, pro
         holdDate: isAdmin ? (det?.holdDate ? formatDateTime(det.holdDate) : '—') : '—',
         holdReason: isAdmin ? (det?.holdReason||'—') : '—', // admin only
         resumeDate: resumeAct ? formatDateTime(resumeAct.timestamp) : '—',
-        submissionDate: det?.submittedAt ? formatDateTime(det.submittedAt) : '—',
+        submissionDate: t.submittedAt ? formatDateTime(t.submittedAt) : '—',
         approvalStatus,
-        adminRemarks: det?.adminRemark||'—',
+        adminRemarks: t.remarks || t.Remarks || '—',
         rejectReason: isAdmin ? (det?.rejectReason||'—') : '—',
         raw: { t, det, acts, holdAct, resumeAct, submitAct, approveAct, rejectAct },
       };

@@ -1112,3 +1112,25 @@
 }
 
 
+
+/* ── Project Status dropdown (admin table) ── */
+.pp-proj-status-select {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  white-space: nowrap;
+  letter-spacing: 0.3px;
+}
+.pp-proj-status-select:focus {
+  box-shadow: 0 0 0 2px rgba(59,130,246,0.3);
+}
+
+/* ── Pre-Closed badge ── */
+.pp-menu-item.pp-btn-finalize { color: #7c3aed; }
+.pp-menu-item.pp-btn-finalize:hover { background: #f3e8ff; }

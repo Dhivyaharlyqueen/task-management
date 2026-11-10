@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null &&
+        request.auth.token.email.lower() == 'admin@hepl.com';
+    }
+
+    match /tasks/{taskId} {
+      allow read: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+    }
+
+    match /task_remarks/{taskId} {
+      allow read: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+      allow write: if isAdmin();
+    }
+
+    match /projects/{projectId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+
+    match /project_details/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail == null ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /deadline_requests/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if isAdmin();
+    }
+
+    match /project_messages/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        resource.data.senderEmail.lower() == request.auth.token.email.lower()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /project_activity/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /daily_activities/{docId} {
+      allow read: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        resource.data.userEmail.lower() == request.auth.token.email.lower()
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{docId} {
+      allow read: if request.auth != null && (
+        isAdmin() ||
+        resource.data.recipientEmail == request.auth.token.email.lower()
+      );
+      allow create: if request.auth != null;
+      allow update: if request.auth != null && (
+        isAdmin() ||
+        resource.data.recipientEmail == request.auth.token.email.lower()
+      );
+      allow delete: if isAdmin();
+    }
+  }
+}
